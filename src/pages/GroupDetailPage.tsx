@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -20,9 +20,24 @@ import {
 
 const GroupDetailPage = () => {
   const { slug } = useParams<{ slug: string }>();
+  const location = useLocation();
   const { logout } = useAuth();
   const [isJoining, setIsJoining] = useState(false);
   const [isMember, setIsMember] = useState(false);
+
+  // Datos del grupo que vienen del formulario de creación o datos por defecto
+  const groupData = location.state?.newGroupData || {
+    name: "Grupo de ejemplo",
+    description: "Este es un grupo de ejemplo para la ciudad de Medellín",
+    location: "Medellín, Colombia",
+    category: "General",
+    memberCount: 1,
+    createdAt: new Date().toISOString(),
+    creator: {
+      name: "Usuario ejemplo",
+      email: "ejemplo@mail.com"
+    }
+  };
   
   const handleJoinGroup = async () => {
     // Mostrar estado de carga
@@ -75,11 +90,11 @@ const GroupDetailPage = () => {
           
           <div className="flex items-center space-x-4">
             <Link 
-              to="/grupos/crear" 
+              to="/" 
               className="inline-flex items-center text-muted-foreground hover:text-primary transition-colors"
             >
               <ArrowLeft className="mr-1 h-4 w-4" />
-              Volver
+              Volver al Inicio
             </Link>
             <Button variant="outline" onClick={logout} size="sm">
               Cerrar Sesión
@@ -96,7 +111,7 @@ const GroupDetailPage = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-3xl font-bold mb-2">
-                    Detalle del Grupo
+                    {groupData.name}
                   </CardTitle>
                   <CardDescription className="text-lg">
                     Grupo: <span className="font-medium">{slug}</span>
@@ -118,7 +133,7 @@ const GroupDetailPage = () => {
                     </div>
                     <div>
                       <p className="font-medium">Miembros</p>
-                      <p className="text-muted-foreground">25 personas</p>
+                      <p className="text-muted-foreground">{groupData.memberCount} {groupData.memberCount === 1 ? 'persona' : 'personas'}</p>
                     </div>
                   </div>
                   
@@ -128,7 +143,7 @@ const GroupDetailPage = () => {
                     </div>
                     <div>
                       <p className="font-medium">Ubicación</p>
-                      <p className="text-muted-foreground">Medellín, Antioquia</p>
+                      <p className="text-muted-foreground">{groupData.location}</p>
                     </div>
                   </div>
                 </div>
@@ -140,7 +155,7 @@ const GroupDetailPage = () => {
                     </div>
                     <div>
                       <p className="font-medium">Creado</p>
-                      <p className="text-muted-foreground">Marzo 2024</p>
+                      <p className="text-muted-foreground">{new Date(groupData.createdAt).toLocaleDateString()}</p>
                     </div>
                   </div>
                   
@@ -150,7 +165,7 @@ const GroupDetailPage = () => {
                     </div>
                     <div>
                       <p className="font-medium">Administrador</p>
-                      <p className="text-muted-foreground">Usuario Demo</p>
+                      <p className="text-muted-foreground">{groupData.creator.name}</p>
                     </div>
                   </div>
                 </div>
@@ -158,7 +173,12 @@ const GroupDetailPage = () => {
 
               {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t">
-                {!isMember ? (
+                {location.state?.newGroupData ? (
+                  <Badge variant="secondary" className="h-10 px-4 flex items-center justify-center">
+                    <User className="mr-2 h-4 w-4" />
+                    Eres el Administrador
+                  </Badge>
+                ) : !isMember ? (
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <Button className="bg-gradient-primary hover:shadow-glow transition-all duration-300">

@@ -182,14 +182,37 @@ export function CreateGroupPage() {
       const response = await groupsApi.createGroup(createGroupData, user.id);
       
       if (response.success && response.data) {
+        // Creamos un "slug" amigable para la URL a partir del nombre
+        const groupSlug = values.name.trim()
+          .toLowerCase()
+          .normalize("NFD") // Normalizar caracteres acentuados
+          .replace(/[\u0300-\u036f]/g, "") // Eliminar diacríticos
+          .replace(/[^a-z0-9\s-]/g, "") // Eliminar caracteres especiales
+          .replace(/\s+/g, '-') // Reemplazar espacios con guiones
+          .replace(/-+/g, '-'); // Eliminar guiones duplicados
+
         toast({
           title: "¡Grupo Creado! ✅",
           description: `El grupo "${values.name}" se ha creado correctamente.`,
         });
         
-        // Redirigimos al usuario a la página del grupo recién creado
+        // Redirigimos al usuario a la página del grupo recién creado con los datos
         setTimeout(() => {
-          navigate(`/grupos/${response.data.id}`);
+          navigate(`/grupos/${groupSlug}`, {
+            state: { 
+              newGroupData: {
+                ...values,
+                id: response.data.id,
+                createdAt: new Date().toISOString(),
+                memberCount: 1,
+                creator: {
+                  id: user.id,
+                  name: user.name || "Usuario",
+                  email: user.email
+                }
+              }
+            }
+          });
         }, 1000);
       } else {
         throw new Error(response.error || "No se pudo crear el grupo.");
