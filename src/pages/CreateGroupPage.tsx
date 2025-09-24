@@ -113,6 +113,33 @@ export function CreateGroupPage() {
   // Obtener el usuario actual desde el contexto de autenticación
   const { user } = useAuth();
 
+  // Función para manejar errores de validación
+  const onValidationErrors = (errors: any) => {
+    console.log("Errores de validación detectados:", errors);
+    
+    // Hacer scroll hasta el primer error
+    const firstError = Object.keys(errors)[0];
+    const errorElement = document.querySelector(`[name="${firstError}"]`);
+    if (errorElement) {
+      errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    
+    // Mostrar toast con el resumen de errores
+    const errorMessages = Object.values(errors).map((error: any) => error.message);
+    toast({
+      title: "Por favor, corrige los errores",
+      description: (
+        <ul className="list-disc list-inside">
+          {errorMessages.map((message: string, index: number) => (
+            <li key={index} className="text-sm">{message}</li>
+          ))}
+        </ul>
+      ),
+      variant: "destructive",
+      duration: 5000,
+    });
+  };
+
   // 3. Función de envío
   async function onSubmit(values: GroupFormValues) {
     try {
@@ -217,7 +244,7 @@ export function CreateGroupPage() {
             
             <CardContent>
               <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+                <form onSubmit={form.handleSubmit(onSubmit, onValidationErrors)} className="space-y-8">
                   
                   {/* CAMPO NOMBRE */}
                   <FormField
@@ -396,16 +423,6 @@ export function CreateGroupPage() {
                     disabled={form.formState.isSubmitting} 
                     className="w-full" 
                     size="lg"
-                    onClick={() => {
-                      // Verificación adicional al hacer clic en el botón
-                      if (form.getValues("rules").length !== participationRules.length) {
-                        toast({
-                          title: "Reglas de participación",
-                          description: "Debes aceptar todas las reglas de participación para crear el grupo.",
-                          variant: "destructive",
-                        });
-                      }
-                    }}
                   >
                     {form.formState.isSubmitting ? (
                       <>
