@@ -1,14 +1,63 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/hooks/useAuth';
-import { Users, ArrowLeft, MapPin, Calendar, User } from 'lucide-react';
+import { Users, ArrowLeft, MapPin, Calendar, User, Loader2 } from 'lucide-react';
+import { toast } from "@/components/ui/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 const GroupDetailPage = () => {
   const { slug } = useParams<{ slug: string }>();
   const { logout } = useAuth();
+  const [isJoining, setIsJoining] = useState(false);
+  const [isMember, setIsMember] = useState(false);
+  
+  const handleJoinGroup = async () => {
+    // Mostrar estado de carga
+    setIsJoining(true);
+    
+    try {
+      // Simulamos una llamada a la API que tarda 1.5 segundos
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Simulamos un error aleatorio (10% de probabilidad)
+      if (Math.random() < 0.1) {
+        throw new Error("Ha ocurrido un error al intentar unirte al grupo.");
+      }
+      
+      // Si todo va bien:
+      setIsMember(true);
+      
+      // Mostrar notificación de éxito
+      toast({
+        title: "¡Te has unido al grupo! ✅",
+        description: `Ahora eres miembro de "${slug}". Explora las actividades y conecta con otros miembros.`,
+      });
+      
+    } catch (error) {
+      // Si algo falla, mostrar notificación de error
+      toast({
+        title: "Error al unirte al grupo ❌",
+        description: error instanceof Error ? error.message : "Ha ocurrido un error inesperado. Inténtalo más tarde.",
+        variant: "destructive",
+      });
+    } finally {
+      // Quitar estado de carga
+      setIsJoining(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-subtle">
@@ -109,10 +158,42 @@ const GroupDetailPage = () => {
 
               {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t">
-                <Button className="bg-gradient-primary hover:shadow-glow transition-all duration-300">
-                  <Users className="mr-2 h-4 w-4" />
-                  Unirse al Grupo
-                </Button>
+                {!isMember ? (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button className="bg-gradient-primary hover:shadow-glow transition-all duration-300">
+                        <Users className="mr-2 h-4 w-4" />
+                        Unirse al Grupo
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>¿Confirmas que quieres unirte al grupo?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Pasarás a ser miembro de "{slug}" y podrías recibir notificaciones sobre su actividad. Puedes salir del grupo en cualquier momento.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleJoinGroup} disabled={isJoining}>
+                          {isJoining ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Uniéndote...
+                            </>
+                          ) : (
+                            "Aceptar y Unirse"
+                          )}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                ) : (
+                  <Button className="bg-green-600 hover:bg-green-700" disabled>
+                    <Users className="mr-2 h-4 w-4" />
+                    Ya eres miembro
+                  </Button>
+                )}
                 <Button variant="outline">
                   <User className="mr-2 h-4 w-4" />
                   Contactar Administrador
