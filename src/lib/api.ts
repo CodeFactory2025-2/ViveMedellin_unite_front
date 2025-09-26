@@ -306,13 +306,14 @@ export const updateUserProfile = async (userId: string, updates: Partial<Omit<Us
   }
   
   // Actualizar campos permitidos
-  Object.keys(updates).forEach(key => {
-    const typedKey = key as keyof typeof updates;
-    if (updates[typedKey] !== undefined) {
-      // @ts-ignore - Ignoramos el error de tipos aquí
-      users[userIndex][typedKey] = updates[typedKey];
-    }
-  });
+  const sanitizedUpdates = Object.fromEntries(
+    Object.entries(updates).filter(([, value]) => value !== undefined)
+  ) as Partial<(typeof users)[number]>;
+
+  users[userIndex] = {
+    ...users[userIndex],
+    ...sanitizedUpdates,
+  };
   
   saveUsers(users);
   

@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/hooks/useAuth';
 import { Users, ArrowLeft, MapPin, Calendar, User, Loader2 } from 'lucide-react';
-import { toast } from "@/components/ui/use-toast";
+import { toast } from '@/hooks/use-toast';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,66 +16,182 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+} from '@/components/ui/alert-dialog';
+import SkipToContent from '@/components/SkipToContent';
+import * as groupsApi from '@/lib/groups-api';
+import type { Group } from '@/lib/groups-api';
+
+const DEFAULT_LOCATION = 'Medellín, Colombia';
 
 const GroupDetailPage = () => {
   const { slug } = useParams<{ slug: string }>();
   const location = useLocation();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
+  const userId = user?.id;
+
+  const [group, setGroup] = useState<Group | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isJoining, setIsJoining] = useState(false);
   const [isMember, setIsMember] = useState(false);
 
-  // Datos del grupo que vienen del formulario de creación o datos por defecto
-  const groupData = location.state?.newGroupData || {
-    name: "Grupo de ejemplo",
-    description: "Este es un grupo de ejemplo para la ciudad de Medellín",
-    location: "Medellín, Colombia",
-    category: "General",
-    memberCount: 1,
-    createdAt: new Date().toISOString(),
-    creator: {
-      name: "Usuario ejemplo",
-      email: "ejemplo@mail.com"
-    }
-  };
-  
-  const handleJoinGroup = async () => {
-    // Mostrar estado de carga
-    setIsJoining(true);
-    
-    try {
-      // Simulamos una llamada a la API que tarda 1.5 segundos
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Simulamos un error aleatorio (10% de probabilidad)
-      if (Math.random() < 0.1) {
-        throw new Error("Ha ocurrido un error al intentar unirte al grupo.");
+  const fallbackGroup = location.state?.newGroupData as
+    | {
+        id: string;
+        slug?: string;
+        name: string;
+        description?: string;
+        memberCount?: number;
+        createdAt?: string;
+        creator?: { id?: string; name?: string; email?: string };
+        location?: string;
+        category?: string;
+        topic?: string;
+        otherTopic?: string;
+        isPublic?: boolean;
       }
-      
-      // Si todo va bien:
-      setIsMember(true);
-      
-      // Mostrar notificación de éxito
+    | undefined;
+
+  useEffect(() => {
+    if (!slug || !userId) {
+      return;
+    }
+
+    let isActive = true;
+
+    const fetchGroup = async () => {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const response = await groupsApi.getGroupBySlug(slug, userId);
+        if (!isActive) return;
+
+        if (response.success && response.data) {
+          const hydratedGroup: Group = {
+            ...response.data,
+            members: [...response.data.members],
+            events: [...response.data.events],
+          };
+          setGroup(hydratedGroup);
+          setIsMember(hydratedGroup.members.some((member) => member.userId === userId));
+        } else {
+          setError(response.error || 'No fue posible cargar el grupo.');
+        }
+      } catch (fetchError) {
+        if (!isActive) return;
+        setError(
+          fetchError instanceof Error
+            ? fetchError.message
+            : 'Ocurrió un error al cargar la información del grupo.'
+        );
+      } finally {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void fetchGroup();
+
+    return () => {
+      isActive = false;
+    };
+  }, [slug, userId]);
+
+  useEffect(() => {
+    if (group && userId) {
+      setIsMember(group.members.some((member) => member.userId === userId));
+    }
+  }, [group, userId]);
+
+  const handleJoinGroup = async () => {
+    if (!group || !userId) {
       toast({
-        title: "¡Te has unido al grupo! ✅",
-        description: `Ahora eres miembro de "${slug}". Explora las actividades y conecta con otros miembros.`,
+        title: 'No fue posible unirse al grupo',
+        description: 'Debes iniciar sesión nuevamente para completar esta acción.',
+        variant: 'destructive',
       });
-      
-    } catch (error) {
-      // Si algo falla, mostrar notificación de error
+      return;
+    }
+
+    setIsJoining(true);
+
+    try {
+      const response = await groupsApi.joinGroup(group.id, userId);
+
+      if (response.success && response.data) {
+        const hydratedGroup: Group = {
+          ...response.data,
+          members: [...response.data.members],
+          events: [...response.data.events],
+        };
+        setGroup(hydratedGroup);
+        setIsMember(true);
+        toast({
+          title: '¡Bienvenida al grupo! 🎉',
+          description: `Te has unido a "${hydratedGroup.name}" exitosamente.`,
+        });
+      } else {
+        toast({
+          title: 'No fue posible unirse al grupo',
+          description: response.error || 'Inténtalo de nuevo más tarde.',
+          variant: 'destructive',
+        });
+      }
+    } catch (joinError) {
       toast({
-        title: "Error al unirte al grupo ❌",
-        description: error instanceof Error ? error.message : "Ha ocurrido un error inesperado. Inténtalo más tarde.",
-        variant: "destructive",
+        title: 'No fue posible unirse al grupo',
+        description:
+          joinError instanceof Error
+            ? joinError.message
+            : 'Hubo un error técnico. Inténtalo nuevamente más tarde.',
+        variant: 'destructive',
       });
     } finally {
-      // Quitar estado de carga
       setIsJoining(false);
     }
   };
 
+  const display = useMemo(() => {
+    const source = group ?? fallbackGroup;
+    const createdAt = group?.createdAt
+      ? new Date(group.createdAt).toLocaleDateString()
+      : fallbackGroup?.createdAt
+      ? new Date(fallbackGroup.createdAt).toLocaleDateString()
+      : undefined;
+
+    const isAdmin = Boolean(
+      userId && (group?.creatorId === userId || fallbackGroup?.creator?.id === userId)
+    );
+
+    return {
+      name: source?.name ?? 'Grupo',
+      description:
+        source?.description ??
+        'Aún no tenemos una descripción disponible para este grupo.',
+      location:
+        (group?.location && group.location.address) || fallbackGroup?.location || DEFAULT_LOCATION,
+      category:
+        group?.category ||
+        fallbackGroup?.category ||
+        fallbackGroup?.topic ||
+        'General',
+      memberCount: group?.members.length ?? fallbackGroup?.memberCount ?? 0,
+      createdAt,
+      isPublic: group?.isPublic ?? fallbackGroup?.isPublic ?? true,
+      isAdmin,
+      creatorLabel:
+        fallbackGroup?.creator?.name ||
+        (group?.creatorId === userId ? user?.name || user?.email || 'Tú' : 'Administrador'),
+    };
+  }, [fallbackGroup, group, userId, user?.email, user?.name]);
+
+  const canJoin = Boolean(group) && display.isPublic && !display.isAdmin && !isMember;
+
   return (
     <div className="min-h-screen bg-gradient-subtle">
+      <SkipToContent />
       {/* Navigation Bar */}
       <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
@@ -103,126 +219,137 @@ const GroupDetailPage = () => {
         </div>
       </nav>
 
-      {/* Main Content */}
-      <div className="container mx-auto px-4 py-12">
+      <main id="main-content" className="container mx-auto px-4 py-12">
         <div className="max-w-4xl mx-auto">
-          <Card className="shadow-primary">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-3xl font-bold mb-2">
-                    {groupData.name}
-                  </CardTitle>
-                  <CardDescription className="text-lg">
-                    Grupo: <span className="font-medium">{slug}</span>
-                  </CardDescription>
-                </div>
-                <Badge className="bg-gradient-primary text-white">
-                  Activo
-                </Badge>
-              </div>
-            </CardHeader>
-            
-            <CardContent className="space-y-8">
-              {/* Group Info */}
-              <div className="grid md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
-                      <Users className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="font-medium">Miembros</p>
-                      <p className="text-muted-foreground">{groupData.memberCount} {groupData.memberCount === 1 ? 'persona' : 'personas'}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
-                      <MapPin className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="font-medium">Ubicación</p>
-                      <p className="text-muted-foreground">{groupData.location}</p>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="space-y-4">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
-                      <Calendar className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="font-medium">Creado</p>
-                      <p className="text-muted-foreground">{new Date(groupData.createdAt).toLocaleDateString()}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
-                      <User className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="font-medium">Administrador</p>
-                      <p className="text-muted-foreground">{groupData.creator.name}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t">
-                {location.state?.newGroupData ? (
-                  <Badge variant="secondary" className="h-10 px-4 flex items-center justify-center">
-                    <User className="mr-2 h-4 w-4" />
-                    Eres el Administrador
-                  </Badge>
-                ) : !isMember ? (
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button className="bg-gradient-primary hover:shadow-glow transition-all duration-300">
-                        <Users className="mr-2 h-4 w-4" />
-                        Unirse al Grupo
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>¿Confirmas que quieres unirte al grupo?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Pasarás a ser miembro de "{slug}" y podrías recibir notificaciones sobre su actividad. Puedes salir del grupo en cualquier momento.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleJoinGroup} disabled={isJoining}>
-                          {isJoining ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Uniéndote...
-                            </>
-                          ) : (
-                            "Aceptar y Unirse"
-                          )}
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                ) : (
-                  <Button className="bg-green-600 hover:bg-green-700" disabled>
-                    <Users className="mr-2 h-4 w-4" />
-                    Ya eres miembro
-                  </Button>
-                )}
-                <Button variant="outline">
-                  <User className="mr-2 h-4 w-4" />
-                  Contactar Administrador
+          {isLoading ? (
+            <div className="flex items-center justify-center py-24" role="status" aria-live="polite">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <span className="sr-only">Cargando información del grupo…</span>
+            </div>
+          ) : error ? (
+            <Card className="shadow-primary">
+              <CardHeader>
+                <CardTitle className="text-2xl font-bold">No se pudo cargar el grupo</CardTitle>
+                <CardDescription>{error}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button variant="outline" asChild>
+                  <Link to="/grupos">Volver a grupos</Link>
                 </Button>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="shadow-primary">
+              <CardHeader>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <CardTitle className="text-3xl font-bold mb-2">
+                      {display.name}
+                    </CardTitle>
+                    <CardDescription className="text-lg">
+                      Grupo: <span className="font-medium">{slug}</span>
+                    </CardDescription>
+                    <p className="mt-4 text-muted-foreground leading-relaxed">{display.description}</p>
+                  </div>
+                  <Badge className="bg-gradient-primary text-white">
+                    {display.isPublic ? 'Público' : 'Privado'}
+                  </Badge>
+                </div>
+              </CardHeader>
+              
+              <CardContent className="space-y-8">
+                {/* Group Info */}
+                <div className="grid md:grid-cols-2 gap-6">
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
+                        <Users className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <p className="font-medium">Miembros</p>
+                        <p className="text-muted-foreground">{display.memberCount} {display.memberCount === 1 ? 'persona' : 'personas'}</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
+                        <MapPin className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <p className="font-medium">Ubicación</p>
+                        <p className="text-muted-foreground">{display.location}</p>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
+                        <Calendar className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <p className="font-medium">Creado</p>
+                        <p className="text-muted-foreground">{display.createdAt ?? 'Fecha no disponible'}</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
+                        <User className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <p className="font-medium">Administrador</p>
+                        <p className="text-muted-foreground">{display.creatorLabel}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t">
+                  {display.isAdmin ? (
+                    <Badge variant="secondary" className="h-10 px-4 flex items-center justify-center">
+                      <User className="mr-2 h-4 w-4" />
+                      Eres el Administrador
+                    </Badge>
+                  ) : isMember ? (
+                    <Button size="lg" disabled>
+                      Ya eres miembro
+                    </Button>
+                  ) : (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button size="lg" className="mt-4" disabled={!canJoin}>
+                          Unirse al Grupo
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>¿Confirmas que quieres unirte al grupo?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Pasarás a ser miembro de "{display.name}" y podrías recibir notificaciones.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                          <AlertDialogAction onClick={handleJoinGroup} disabled={isJoining}>
+                            {isJoining ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            {isJoining ? 'Uniéndote…' : 'Aceptar y Unirse'}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  )}
+                  <Button variant="outline">
+                    <User className="mr-2 h-4 w-4" />
+                    Contactar Administrador
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
-      </div>
+      </main>
     </div>
   );
 };

@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import * as api from '@/lib/api';
+import type { User } from '@/lib/api';
 import { Loader2, CheckCircle } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
@@ -20,7 +21,7 @@ const TestApiPage: React.FC = () => {
   const [loginPassword, setLoginPassword] = useState('');
   
   // Estado para mostrar los usuarios registrados
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   
   // Estado para verificar manualmente un usuario
   const [verifyEmail, setVerifyEmail] = useState('');
@@ -30,8 +31,12 @@ const TestApiPage: React.FC = () => {
   const fetchUsers = () => {
     const storedUsers = localStorage.getItem('vive-medellin-users');
     if (storedUsers) {
-      const parsedUsers = JSON.parse(storedUsers);
-      setUsers(parsedUsers);
+      try {
+        const parsedUsers = JSON.parse(storedUsers) as User[];
+        setUsers(parsedUsers);
+      } catch {
+        setUsers([]);
+      }
     } else {
       setUsers([]);
     }
@@ -75,8 +80,8 @@ const TestApiPage: React.FC = () => {
         fetchUsers();
         
         // Simular verificación automática (solo para pruebas)
-        const users = JSON.parse(localStorage.getItem('vive-medellin-users') || '[]');
-        const user = users.find((u: any) => u.email === registerEmail);
+        const stored = JSON.parse(localStorage.getItem('vive-medellin-users') || '[]') as User[];
+        const user = stored.find((u) => u.email === registerEmail);
         if (user && user.verificationToken) {
           console.log(`Token de verificación para ${registerEmail}: ${user.verificationToken}`);
           await api.verifyEmail(registerEmail, user.verificationToken);

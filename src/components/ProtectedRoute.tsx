@@ -12,12 +12,15 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
 
   useEffect(() => {
     if (!isAuthenticated) {
-      setPendingRedirect(location.pathname + location.search);
+      const targetPath = `${location.pathname}${location.search}${location.hash}` || '/';
+      setPendingRedirect(targetPath);
     }
-  }, [isAuthenticated, location.pathname, location.search, setPendingRedirect]);
+  }, [isAuthenticated, location.hash, location.pathname, location.search, setPendingRedirect]);
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    const targetPath = `${location.pathname}${location.search}${location.hash}` || '/';
+    const search = new URLSearchParams({ from: targetPath }).toString();
+    return <Navigate to={{ pathname: '/login', search: `?${search}` }} replace />;
   }
 
   return <>{children}</>;

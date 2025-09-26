@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
+import { FieldErrors, useForm } from "react-hook-form";
 import { z } from "zod";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -34,6 +34,7 @@ import {
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Users, ArrowLeft, Plus, Loader2 } from "lucide-react";
+import SkipToContent from "@/components/SkipToContent";
 
 // 1. Esquema de Validación con Zod
 const groupFormSchema = z
@@ -92,7 +93,7 @@ const participationRules = [
 ];
 
 export function CreateGroupPage() {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const navigate = useNavigate(); // Hook para la redirección
 
   // 2. Definición del formulario
@@ -110,34 +111,52 @@ export function CreateGroupPage() {
 
   const watchedTopic = form.watch("topic");
 
-  // Obtener el usuario actual desde el contexto de autenticación
-  const { user } = useAuth();
-
   // Función para manejar errores de validación
-  const onValidationErrors = (errors: any) => {
+  const onValidationErrors = (errors: FieldErrors<GroupFormValues>) => {
     console.log("Errores de validación detectados:", errors);
-    
-    // Hacer scroll hasta el primer error
-    const firstError = Object.keys(errors)[0];
-    const errorElement = document.querySelector(`[name="${firstError}"]`);
-    if (errorElement) {
-      errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    const firstErrorKey = Object.keys(errors)[0];
+    if (firstErrorKey) {
+      const errorElement = document.querySelector<HTMLElement>(`[name="${firstErrorKey}"]`);
+      errorElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-    
-    // Mostrar toast con el resumen de errores
-    const errorMessages = Object.values(errors).map((error: any) => error.message);
-    toast({
-      title: "Por favor, corrige los errores",
-      description: (
-        <ul className="list-disc list-inside">
-          {errorMessages.map((message: string, index: number) => (
-            <li key={index} className="text-sm">{message}</li>
-          ))}
-        </ul>
-      ),
-      variant: "destructive",
-      duration: 5000,
-    });
+
+    const collectMessages = (fieldErrors: FieldErrors<GroupFormValues>): string[] => {
+      return Object.values(fieldErrors).flatMap((error) => {
+        if (!error) {
+          return [];
+        }
+
+        if ('message' in error && error.message) {
+          return [String(error.message)];
+        }
+
+        if (typeof error === 'object') {
+          return collectMessages(error as FieldErrors<GroupFormValues>);
+        }
+
+        return [];
+      });
+    };
+
+    const errorMessages = collectMessages(errors);
+
+    if (errorMessages.length > 0) {
+      toast({
+        title: "Por favor, corrige los errores",
+        description: (
+          <ul className="list-disc list-inside">
+            {errorMessages.map((message, index) => (
+              <li key={`${message}-${index}`} className="text-sm">
+                {message}
+              </li>
+            ))}
+          </ul>
+        ),
+        variant: "destructive",
+        duration: 5000,
+      });
+    }
   };
 
   // 3. Función de envío
@@ -182,15 +201,6 @@ export function CreateGroupPage() {
       const response = await groupsApi.createGroup(createGroupData, user.id);
       
       if (response.success && response.data) {
-        // Creamos un "slug" amigable para la URL a partir del nombre
-        const groupSlug = values.name.trim()
-          .toLowerCase()
-          .normalize("NFD") // Normalizar caracteres acentuados
-          .replace(/[\u0300-\u036f]/g, "") // Eliminar diacríticos
-          .replace(/[^a-z0-9\s-]/g, "") // Eliminar caracteres especiales
-          .replace(/\s+/g, '-') // Reemplazar espacios con guiones
-          .replace(/-+/g, '-'); // Eliminar guiones duplicados
-
         toast({
           title: "¡Grupo Creado! ✅",
           description: `El grupo "${values.name}" se ha creado correctamente.`,
@@ -198,23 +208,38 @@ export function CreateGroupPage() {
         
         // Redirigimos al usuario a la página del grupo recién creado con los datos
         setTimeout(() => {
-          navigate(`/grupos/${groupSlug}`, {
-            state: { 
+          navigate(`/grupos/${response.data.slug}`, {
+            state: {
               newGroupData: {
                 ...values,
                 id: response.data.id,
+                slug: response.data.slug,
                 createdAt: new Date().toISOString(),
-                memberCount: 1,
+                memberCount: response.data.members.length,
                 creator: {
                   id: user.id,
                   name: user.name || "Usuario",
-                  email: user.email
-                }
-              }
-            }
+                  email: user.email,
+                },
+                isPublic: response.data.isPublic,
+              },
+            },
           });
-        }, 1000);
+        }, 600);
       } else {
+        if (response.status === 409) {
+          form.setError('name', {
+            type: 'manual',
+            message: response.error || 'Ya existe un grupo con ese nombre.',
+          });
+          toast({
+            title: 'Nombre en uso',
+            description: response.error || 'Ya existe un grupo con ese nombre.',
+            variant: 'destructive',
+          });
+          return;
+        }
+
         throw new Error(response.error || "No se pudo crear el grupo.");
       }
     } catch (error) {
@@ -228,6 +253,7 @@ export function CreateGroupPage() {
 
   return (
     <div className="min-h-screen bg-gradient-subtle">
+      <SkipToContent />
       {/* Barra de Navegación */}
       <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
@@ -252,7 +278,7 @@ export function CreateGroupPage() {
       </nav>
 
       {/* Contenido Principal */}
-      <div className="container mx-auto px-4 py-12">
+      <main id="main-content" className="container mx-auto px-4 py-12">
         <div className="max-w-2xl mx-auto">
           <Card className="shadow-primary">
             <CardHeader className="text-center">
@@ -461,7 +487,7 @@ export function CreateGroupPage() {
             </CardContent>
           </Card>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

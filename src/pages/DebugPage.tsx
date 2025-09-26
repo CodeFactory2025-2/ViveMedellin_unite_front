@@ -4,7 +4,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 
-export const debugStyles = {
+const debugStyles = {
   container: "border border-gray-300 rounded-md p-4 mt-6",
   title: "text-lg font-semibold mb-2",
   content: "whitespace-pre-wrap bg-gray-100 p-2 rounded",
@@ -13,7 +13,7 @@ export const debugStyles = {
 
 interface DebugPanelProps {
   title: string;
-  data: any;
+  data: unknown;
   actions?: { label: string; onClick: () => void }[];
 }
 
@@ -22,7 +22,7 @@ const DebugPanel: React.FC<DebugPanelProps> = ({ title, data, actions }) => {
     <div className={debugStyles.container}>
       <h3 className={debugStyles.title}>{title}</h3>
       <pre className={debugStyles.content}>
-        {typeof data === 'object' ? JSON.stringify(data, null, 2) : data}
+        {typeof data === 'object' && data !== null ? JSON.stringify(data, null, 2) : String(data)}
       </pre>
       {actions && (
         <div className="flex gap-2 mt-2">
@@ -43,16 +43,16 @@ const DebugPanel: React.FC<DebugPanelProps> = ({ title, data, actions }) => {
 
 const DebugPage = () => {
   const auth = useAuth();
-  const [localStorageContent, setLocalStorageContent] = useState<Record<string, any>>({});
-  const [sessionStorageContent, setSessionStorageContent] = useState<Record<string, any>>({});
+  const [localStorageContent, setLocalStorageContent] = useState<Record<string, unknown>>({});
+  const [sessionStorageContent, setSessionStorageContent] = useState<Record<string, unknown>>({});
   const [isInputsEnabled, setIsInputsEnabled] = useState(true);
   const [inputValue, setInputValue] = useState('');
   const [checkboxValue, setCheckboxValue] = useState(false);
   
   // Función para leer el almacenamiento y actualizar el estado
   const refreshStorage = useCallback(() => {
-    const localItems: Record<string, any> = {};
-    const sessionItems: Record<string, any> = {};
+    const localItems: Record<string, unknown> = {};
+    const sessionItems: Record<string, unknown> = {};
     
     // Leer localStorage
     for (let i = 0; i < localStorage.length; i++) {
@@ -60,7 +60,7 @@ const DebugPage = () => {
       if (key) {
         try {
           // Intentar parsear como JSON
-          localItems[key] = JSON.parse(localStorage.getItem(key) || '');
+          localItems[key] = JSON.parse(localStorage.getItem(key) || 'null');
         } catch {
           // Si no es JSON válido, almacenar como cadena
           localItems[key] = localStorage.getItem(key);
@@ -73,7 +73,7 @@ const DebugPage = () => {
       const key = sessionStorage.key(i);
       if (key) {
         try {
-          sessionItems[key] = JSON.parse(sessionStorage.getItem(key) || '');
+          sessionItems[key] = JSON.parse(sessionStorage.getItem(key) || 'null');
         } catch {
           sessionItems[key] = sessionStorage.getItem(key);
         }

@@ -6,6 +6,7 @@ import { User } from './api';
 // Tipos
 export interface Group {
   id: string;
+  slug: string;
   name: string;
   description: string;
   category: string;
@@ -82,6 +83,7 @@ export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
+  status?: number;
 }
 
 // Simulación de base de datos
@@ -94,11 +96,75 @@ const generateId = (): string => {
 
 const getGroups = (): Group[] => {
   const groups = localStorage.getItem(GROUPS_KEY);
-  return groups ? JSON.parse(groups) : [];
+  let parsed: unknown = [];
+
+  if (groups) {
+    try {
+      parsed = JSON.parse(groups);
+    } catch (error) {
+      console.warn('No se pudo parsear la información de grupos almacenada. Se restablecerá la lista.', error);
+      parsed = [];
+    }
+  }
+
+  const array = Array.isArray(parsed) ? parsed : [];
+
+  if (!Array.isArray(parsed)) {
+    console.warn('El formato de la lista de grupos es inválido. Se restablecerá la lista.');
+    saveGroups([]);
+  }
+
+  return ensureSlugs(array as Group[]);
 };
 
 const saveGroups = (groups: Group[]): void => {
   localStorage.setItem(GROUPS_KEY, JSON.stringify(groups));
+};
+
+const slugify = (text: string): string =>
+  text
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+
+const makeUniqueSlug = (baseSlug: string, reserved: Set<string>): string => {
+  const base = baseSlug || 'grupo';
+  let candidate = base;
+  let suffix = 1;
+
+  while (reserved.has(candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+
+  return candidate;
+};
+
+const ensureSlugs = (groups: Group[]): Group[] => {
+  let updated = false;
+  const reserved = new Set<string>();
+  const withSlugs = groups.map((group) => {
+    let slug = group.slug || slugify(group.name) || 'grupo';
+    if (reserved.has(slug)) {
+      slug = makeUniqueSlug(slug, reserved);
+    }
+    reserved.add(slug);
+    if (slug !== group.slug) {
+      updated = true;
+      return { ...group, slug };
+    }
+    return group;
+  });
+
+  if (updated) {
+    saveGroups(withSlugs);
+  }
+
+  return withSlugs;
 };
 
 const delay = (ms: number = 800): Promise<void> => {
@@ -158,6 +224,36 @@ export const getGroupById = async (groupId: string, userId: string): Promise<Api
   };
 };
 
+export const getGroupBySlug = async (slug: string, userId: string): Promise<ApiResponse<Group>> => {
+  await delay();
+
+  const groups = getGroups();
+  const group = groups.find((g) => g.slug === slug);
+
+  if (!group) {
+    return {
+      success: false,
+      error: 'Grupo no encontrado',
+      status: 404,
+    };
+  }
+
+  const hasAccess = group.isPublic || group.members.some((member) => member.userId === userId);
+
+  if (!hasAccess) {
+    return {
+      success: false,
+      error: 'No tienes permiso para ver este grupo',
+      status: 403,
+    };
+  }
+
+  return {
+    success: true,
+    data: group,
+  };
+};
+
 /**
  * Crea un nuevo grupo
  */
@@ -165,10 +261,28 @@ export const createGroup = async (request: CreateGroupRequest, userId: string): 
   await delay();
   
   const groups = getGroups();
+  const normalizedName = request.name.trim();
+
+  if (
+    groups.some(
+      (group) => group.name.trim().toLowerCase() === normalizedName.toLowerCase()
+    )
+  ) {
+    return {
+      success: false,
+      error: 'Ya existe un grupo con ese nombre.',
+      status: 409,
+    };
+  }
+
+  const baseSlug = slugify(normalizedName) || 'grupo';
+  const existingSlugs = new Set(groups.map((group) => group.slug));
+  const slug = makeUniqueSlug(baseSlug, existingSlugs);
   
   // Crear el nuevo grupo
   const newGroup: Group = {
     id: generateId(),
+    slug,
     name: request.name,
     description: request.description,
     category: request.category,
@@ -210,7 +324,8 @@ export const updateGroup = async (groupId: string, request: UpdateGroupRequest, 
   if (groupIndex === -1) {
     return {
       success: false,
-      error: 'Grupo no encontrado'
+      error: 'Grupo no encontrado',
+      status: 404,
     };
   }
   
@@ -302,14 +417,16 @@ export const joinGroup = async (groupId: string, userId: string): Promise<ApiRes
   if (!group.isPublic) {
     return {
       success: false,
-      error: 'Este es un grupo privado'
+      error: 'Este es un grupo privado',
+      status: 403,
     };
   }
-  
+
   if (group.members.some(m => m.userId === userId)) {
     return {
       success: false,
-      error: 'Ya eres miembro de este grupo'
+      error: 'Ya eres miembro de este grupo',
+      status: 409,
     };
   }
   
@@ -505,6 +622,7 @@ export const initializeMockGroupsData = (): void => {
     const groups: Group[] = [
       {
         id: '1',
+        slug: 'amigos-del-parque-arvi',
         name: 'Amigos del Parque Arví',
         description: 'Grupo para organizar actividades, caminatas y conservación del Parque Arví.',
         category: 'Naturaleza',
@@ -515,7 +633,7 @@ export const initializeMockGroupsData = (): void => {
           longitude: -75.4975,
           address: 'Parque Arví, Medellín'
         },
-        imageUrl: 'https://images.unsplash.com/photo-1586092468847-a155de775523?q=80&w=500&auto=format&fit=crop',
+        imageUrl: 'https://images.unsplash.com/photo-1676642168640-b20591400950?q=80&w=1287&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D',
         creatorId: '1', // Usuario Demo
         createdAt: Date.now() - 86400000 * 10, // 10 días atrás
         members: [
@@ -552,6 +670,7 @@ export const initializeMockGroupsData = (): void => {
       },
       {
         id: '2',
+        slug: 'voluntarios-el-poblado',
         name: 'Voluntarios El Poblado',
         description: 'Red de voluntarios para proyectos comunitarios en El Poblado.',
         category: 'Comunidad',
@@ -575,6 +694,7 @@ export const initializeMockGroupsData = (): void => {
       },
       {
         id: '3',
+        slug: 'club-de-lectura-medellin',
         name: 'Club de Lectura Medellín',
         description: 'Compartimos y discutimos nuestras lecturas favoritas mensualmente.',
         category: 'Cultura',

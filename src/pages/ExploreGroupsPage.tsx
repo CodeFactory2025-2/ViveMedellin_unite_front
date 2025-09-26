@@ -43,7 +43,7 @@ const ExploreGroupsPage = () => {
   const [filteredGroups, setFilteredGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
   const [visibilityFilter, setVisibilityFilter] = useState('all'); // 'all', 'public', 'private'
 
   // Obtener todos los grupos cuando se monta el componente
@@ -96,16 +96,23 @@ const ExploreGroupsPage = () => {
     // Filtrar por término de búsqueda
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(group => 
-        group.name.toLowerCase().includes(term) || 
-        group.description.toLowerCase().includes(term) ||
-        (group.theme && group.theme.toLowerCase().includes(term))
-      );
+      filtered = filtered.filter(group => {
+        const name = group.name?.toLowerCase?.() ?? '';
+        const description = group.description?.toLowerCase?.() ?? '';
+        const theme = group.theme?.toLowerCase?.() ?? '';
+
+        return name.includes(term) || description.includes(term) || theme.includes(term);
+      });
     }
 
     // Filtrar por categoría
-    if (selectedCategory) {
-      filtered = filtered.filter(group => group.category === selectedCategory);
+    if (selectedCategory !== 'all') {
+      filtered = filtered.filter(group => {
+        if (typeof group.category !== 'string') {
+          return false;
+        }
+        return group.category === selectedCategory;
+      });
     }
 
     // Filtrar por visibilidad
@@ -121,11 +128,12 @@ const ExploreGroupsPage = () => {
   const categories = React.useMemo(() => {
     const uniqueCategories = new Set<string>();
     groups.forEach(group => {
-      if (group.category) {
-        uniqueCategories.add(group.category);
+      const category = typeof group.category === 'string' ? group.category.trim() : '';
+      if (category) {
+        uniqueCategories.add(category);
       }
     });
-    return Array.from(uniqueCategories);
+    return Array.from(uniqueCategories).sort();
   }, [groups]);
 
   // Manejar unirse a un grupo
@@ -142,8 +150,8 @@ const ExploreGroupsPage = () => {
         });
         
         // Actualizar la lista de grupos
-        const updatedGroups = groups.map(group => 
-          group.id === groupId ? response.data! : group
+        const updatedGroups = groups.map(group =>
+          group.id === groupId && response.data ? response.data : group
         );
         
         setGroups(updatedGroups);
@@ -166,14 +174,25 @@ const ExploreGroupsPage = () => {
 
   // Comprobar si el usuario ya es miembro de un grupo
   const isMember = (group: Group) => {
-    return user?.id ? group.members.some(member => member.userId === user.id) : false;
+    if (!user?.id) {
+      return false;
+    }
+
+    if (!Array.isArray(group.members)) {
+      return false;
+    }
+
+    return group.members.some(member => member.userId === user.id);
   };
 
   return (
     <div className="container mx-auto py-8 px-4">
-      <div className="flex flex-col md:flex-row justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold mb-4 md:mb-0">Explorar Grupos</h1>
-        <Button onClick={() => navigate('/grupos/crear')} className="bg-gradient-primary">
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-8">
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <Button variant="ghost" onClick={() => navigate('/')}>Volver al inicio</Button>
+          <h1 className="text-3xl font-bold">Explorar Grupos</h1>
+        </div>
+        <Button onClick={() => navigate('/grupos/crear')} className="bg-gradient-primary w-full md:w-auto">
           <Plus className="mr-2 h-4 w-4" />
           Crear Grupo
         </Button>
@@ -196,7 +215,7 @@ const ExploreGroupsPage = () => {
             <SelectValue placeholder="Categoría" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">Todas las categorías</SelectItem>
+            <SelectItem value="all">Todas las categorías</SelectItem>
             {categories.map(category => (
               <SelectItem key={category} value={category}>{category}</SelectItem>
             ))}
@@ -222,7 +241,15 @@ const ExploreGroupsPage = () => {
         </div>
       ) : filteredGroups.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredGroups.map(group => (
+          {filteredGroups.map(group => {
+            const categoryLabel = typeof group.category === 'string' && group.category.trim().length > 0
+              ? group.category
+              : 'Sin categoría';
+            const description = typeof group.description === 'string' && group.description.trim().length > 0
+              ? group.description
+              : 'Aún no hay una descripción para este grupo.';
+
+            return (
             <Card key={group.id} className="overflow-hidden hover:shadow-lg transition-shadow">
               {group.imageUrl && (
                 <div className="w-full h-48 overflow-hidden">
@@ -244,13 +271,13 @@ const ExploreGroupsPage = () => {
                 </div>
                 <CardDescription>
                   <span className="inline-block bg-primary/10 text-primary rounded-full px-3 py-1 text-xs font-medium">
-                    {group.category}
+                    {categoryLabel}
                   </span>
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <p className="line-clamp-3 text-muted-foreground mb-4">
-                  {group.description}
+                  {description}
                 </p>
                 {group.theme && (
                   <p className="text-sm font-medium mb-2">
@@ -259,8 +286,8 @@ const ExploreGroupsPage = () => {
                 )}
                 <div className="flex items-center text-sm text-muted-foreground mt-4">
                   <Users className="h-4 w-4 mr-1" />
-                  <span>{group.members.length} miembros</span>
-                  {group.events.length > 0 && (
+                  <span>{Array.isArray(group.members) ? group.members.length : 0} miembros</span>
+                  {Array.isArray(group.events) && group.events.length > 0 && (
                     <>
                       <span className="mx-2">•</span>
                       <Calendar className="h-4 w-4 mr-1" />
@@ -272,7 +299,7 @@ const ExploreGroupsPage = () => {
               <CardFooter className="flex justify-between">
                 <Button 
                   variant="outline" 
-                  onClick={() => navigate(`/grupos/${group.id}`)}
+                  onClick={() => navigate(`/grupos/${group.slug ?? group.id}`)}
                 >
                   Ver detalles
                 </Button>
@@ -290,7 +317,8 @@ const ExploreGroupsPage = () => {
                 )}
               </CardFooter>
             </Card>
-          ))}
+          );
+          })}
         </div>
       ) : (
         <div className="text-center p-10 border rounded-lg">

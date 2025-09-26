@@ -2,12 +2,28 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Users, Heart, MapPin } from 'lucide-react';
+import { Users, Heart, MapPin, LogOut } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import SkipToContent from '@/components/SkipToContent';
 
 const HomePage = () => {
+  const { isAuthenticated, logout } = useAuth();
+
   return (
     <div className="min-h-screen bg-gradient-subtle">
-      <div className="container mx-auto px-4 py-16">
+      <SkipToContent />
+      {isAuthenticated ? (
+        <header className="border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="container mx-auto px-4 py-4 flex justify-end">
+            <Button variant="outline" size="sm" onClick={logout} className="flex items-center gap-2">
+              <LogOut className="h-4 w-4" />
+              Cerrar Sesión
+            </Button>
+          </div>
+        </header>
+      ) : null}
+
+      <main id="main-content" className="container mx-auto px-4 py-16">
         {/* Hero Section */}
         <div className="text-center mb-16">
           <div className="bg-gradient-hero bg-clip-text text-transparent mb-6">
@@ -19,15 +35,26 @@ const HomePage = () => {
             Conecta con tu ciudad, descubre experiencias únicas y vive Medellín como nunca antes
           </p>
           
-          <Link to="/grupos/crear">
-            <Button 
-              size="lg" 
-              className="bg-gradient-primary hover:shadow-glow transition-all duration-300 text-lg px-8 py-6 h-auto"
-            >
-              <Users className="mr-2 h-5 w-5" />
-              Crear Grupo
-            </Button>
-          </Link>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <Link to="/grupos/crear">
+              <Button 
+                size="lg" 
+                className="bg-gradient-primary hover:shadow-glow transition-all duration-300 text-lg px-8 py-6 h-auto"
+              >
+                <Users className="mr-2 h-5 w-5" />
+                Crear Grupo
+              </Button>
+            </Link>
+            <Link to="/grupos">
+              <Button 
+                size="lg"
+                variant="outline"
+                className="text-lg px-8 py-6 h-auto"
+              >
+                Explorar Grupos
+              </Button>
+            </Link>
+          </div>
         </div>
 
         {/* Features Grid */}
@@ -62,7 +89,7 @@ const HomePage = () => {
             </p>
           </Card>
         </div>
-      </div>
+      </main>
     </div>
   );
 };

@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { LogIn, ArrowLeft, UserPlus, Loader2 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useToast } from "@/components/ui/use-toast";
+import SkipToContent from '@/components/SkipToContent';
 import { 
   Form, 
   FormControl, 
@@ -60,6 +61,8 @@ type ForgotPasswordFormValues = z.infer<typeof forgotPasswordSchema>;
 const LoginPage = () => {
   const { login, register, resetPassword } = useAuth();
   const { toast } = useToast();
+  const [searchParams] = useSearchParams();
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const [isRegistering, setIsRegistering] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -94,21 +97,20 @@ const LoginPage = () => {
   });
 
   useEffect(() => {
-    const hasShownRedirectToast = sessionStorage.getItem('redirectToastShown');
+    const fromPath = searchParams.get('from');
 
-    if (!hasShownRedirectToast) {
+    if (fromPath) {
       toast({
         title: "Acceso Restringido",
         description: "Debes iniciar sesión para acceder a esa página.",
         variant: "destructive",
       });
-      sessionStorage.setItem('redirectToastShown', 'true');
     }
 
-    return () => {
-      sessionStorage.removeItem('redirectToastShown');
-    };
-  }, [toast]);
+    if (headingRef.current) {
+      headingRef.current.focus();
+    }
+  }, [searchParams, toast]);
 
   const handleLogin = async (values: LoginFormValues) => {
     setIsSubmitting(true);
@@ -157,16 +159,18 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-subtle flex items-center justify-center p-4" role="main">
-      <div className="w-full max-w-md">
-        <Card className="shadow-primary">
+    <>
+      <SkipToContent />
+      <main id="main-content" className="min-h-screen bg-gradient-subtle flex items-center justify-center p-4" role="main">
+        <div className="w-full max-w-md">
+          <Card className="shadow-primary">
           <CardHeader className="text-center">
             <div className="w-16 h-16 bg-gradient-primary rounded-full flex items-center justify-center mx-auto mb-4" aria-hidden="true">
               {isRegistering ? <UserPlus className="h-8 w-8 text-white" /> : 
                isForgotPassword ? <ArrowLeft className="h-8 w-8 text-white" /> : 
                <LogIn className="h-8 w-8 text-white" />}
             </div>
-            <CardTitle className="text-2xl font-bold">
+            <CardTitle ref={headingRef} tabIndex={-1} className="text-2xl font-bold outline-none">
               {isRegistering ? "Crear Cuenta" : 
                isForgotPassword ? "Recuperar Contraseña" : 
                "Iniciar Sesión"}
@@ -483,9 +487,10 @@ const LoginPage = () => {
               </p>
             </div>
           </CardFooter>
-        </Card>
-      </div>
-    </div>
+          </Card>
+        </div>
+      </main>
+    </>
   );
 };
 
