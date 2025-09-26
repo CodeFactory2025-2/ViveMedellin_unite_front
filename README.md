@@ -1,73 +1,95 @@
-# Welcome to your Lovable project
+# ViveMedellín – Feature 4 (Front-end)
 
-## Project info
+Proyecto académico desarrollado para practicar metodología Scrum. Nuestro squad actuó como equipo Front y se enfocó en la Feature 4: Creación y Gestión de Grupos/Comunidades de la plataforma “ViveMedellín”.
 
-**URL**: https://lovable.dev/projects/55558096-fa00-440f-b512-8fa577061e8e
+### Objetivo General del Proyecto
 
-## How can I edit this code?
+Construir una plataforma inteligente que permita a los usuarios descubrir y participar en actividades en Medellín, favoreciendo la interacción social, la personalización y el acceso a información relevante.
 
-There are several ways of editing your application.
+### Alcance Feature 4
 
-**Use Lovable**
+Funcionalidades entregadas en este sprint:
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/55558096-fa00-440f-b512-8fa577061e8e) and start prompting.
+- Crear grupos públicos/privados (formularios con validaciones y persistencia en mock API).
+- Explorar grupos públicos y grupos propios, con filtros y búsqueda.
+- Detalle del grupo con acciones de unión/desunión y feedback.
+- Unirse a grupos públicos (diálogo de confirmación, estados de carga/error, toasts accesibles).
+- Accesibilidad AA: foco controlado, skip links, toast aria-live, inputs etiquetados.
+- Persistencia mock usando localStorage.
 
-Changes made via Lovable will be committed automatically to this repo.
+### Historias y tareas comprometidas
 
-**Use your preferred IDE**
+1. HU-01 Validar acceso para crear grupo
+Guard, redirección a /login?from=..., toast de acceso restringido, foco en título.
+2. HU-02 Crear un grupo
+Formulario con react-hook-form + zod, checklist de reglas, toast de éxito/error, integración mock createGroup.
+3. HU-03 Unirse a grupo público
+Card con botón “Unirse”, diálogo de confirmación, cambios de estado, integración joinGroup.
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+Las evidencias (GIFs/capturas) y la planeación de sprint se documentaron en Jira (ID AB#… según backlog del curso).
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### Tecnologías
 
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
-
-**Edit a file directly in GitHub**
-
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
-
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
+- React 18 + Vite
 - TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+- shadcn/ui + Tailwind CSS (componentes adaptados a la guía de UI)
+- react-hook-form + zod
+- tanstack/react-query para data-fetching mock
+- Context API (useAuth) para autenticación simulada
+- lucide-react para iconografía
 
-## How can I deploy this project?
+### Scripts
 
-Simply open [Lovable](https://lovable.dev/projects/55558096-fa00-440f-b512-8fa577061e8e) and click on Share -> Publish.
+npm install        # instalar dependencias
+npm run dev        # modo desarrollo (Vite)
+npm run lint       # eslint con reglas del equipo
+npm run build      # build de producción
+npm run preview    # servir el build localmente
 
-## Can I connect a custom domain to my Lovable project?
+### Estructura relevante
 
-Yes, you can!
+- src/pages
+  - HomePage, LoginPage, RegisterPage, CreateGroupPage, ExploreGroupsPage, GroupDetailPage, DebugPage, etc.
+- src/components
+  - ProtectedRoute, SkipToContent, componentes UI (button, card, alert-dialog, etc.).
+- src/hooks/useAuth.tsx
+  - Contexto de autenticación mock (login, register, logout, pending redirects).
+- src/lib/api.ts, src/lib/groups-api.ts
+  - Endpoints simulados con persistencia en localStorage.
+  - initializeMockGroupsData() contiene los grupos demo (Amigos del Parque Arví, Voluntarios El Poblado, etc.).Puedes modificar imageUrl (URLs públicas) o mover imágenes estáticas al directorio public/.
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+### Mock Data y Reset
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+- Usuarios y grupos se inicializan en initializeMockData() / initializeMockGroupsData().
+- Para regenerar datos: abrir DevTools → Application/Storage → eliminar vive-medellin-* o usar /debug → botón “Borrar todo el almacenamiento”.
+
+### Accesibilidad y UX
+
+- Checklist AA del A11Y Project.
+- Skip link (Saltar al contenido), foco programático en /login, toasts con aria-live.
+- Formularios con etiquetas, aria-describedby, estados de carga y error visibles.
+- Botones de navegación (“Volver al inicio”) y estados vacíos en /grupos.
+
+### Credenciales Demo
+
+Los usuarios mock se almacenan en localStorage. Durante las pruebas se utilizaron correos como:
+
+- usuario@example.com / 123456
+- admin@example.com / 123456
+(Ver initializeMockData para actualizaciones).
+
+### Metodología
+
+- Sprint basado en historias y tareas de Jira.
+- Daily, Review y Retrospective documentadas en el repositorio de evidencias del curso.
+- Definición Ready/Done, DoR/DoD alineadas con el Product Owner académico.
+
+### Equipo
+
+- Front-end (Feature 4):
+- Integración en GitHub Classroom
+- Docente:
+
+### Licencia / Uso Académico
+
+Proyecto académico sin fines comerciales. Uso exclusivo para aprendizaje de Scrum y desarrollo Front-end.
