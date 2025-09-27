@@ -193,7 +193,7 @@ const ExploreGroupsPage = () => {
           <h1 className="text-3xl font-bold">Explorar Grupos</h1>
         </div>
         <Button onClick={() => navigate('/grupos/crear')} className="bg-gradient-primary w-full md:w-auto">
-          <Plus className="mr-2 h-4 w-4" />
+          <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
           Crear Grupo
         </Button>
       </div>
@@ -201,7 +201,7 @@ const ExploreGroupsPage = () => {
       {/* Filtros */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
           <Input
             placeholder="Buscar grupos..."
             className="pl-8"
@@ -263,10 +263,10 @@ const ExploreGroupsPage = () => {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-xl">{group.name}</CardTitle>
-                  {group.isPublic ? (
-                    <Globe className="h-4 w-4 text-muted-foreground" />
+                    {group.isPublic ? (
+                    <Globe className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                   ) : (
-                    <Lock className="h-4 w-4 text-muted-foreground" />
+                    <Lock className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                   )}
                 </div>
                 <CardDescription>
@@ -284,13 +284,13 @@ const ExploreGroupsPage = () => {
                     <span className="font-bold">Tema:</span> {group.theme}
                   </p>
                 )}
-                <div className="flex items-center text-sm text-muted-foreground mt-4">
-                  <Users className="h-4 w-4 mr-1" />
+                 <div className="flex items-center text-sm text-muted-foreground mt-4">
+                  <Users className="h-4 w-4 mr-1" aria-hidden="true" />
                   <span>{Array.isArray(group.members) ? group.members.length : 0} miembros</span>
                   {Array.isArray(group.events) && group.events.length > 0 && (
                     <>
                       <span className="mx-2">•</span>
-                      <Calendar className="h-4 w-4 mr-1" />
+                      <Calendar className="h-4 w-4 mr-1" aria-hidden="true" />
                       <span>{group.events.length} eventos</span>
                     </>
                   )}

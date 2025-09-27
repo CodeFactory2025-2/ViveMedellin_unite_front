@@ -3,7 +3,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { LogIn, ArrowLeft, UserPlus, Loader2 } from 'lucide-react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from "@/components/ui/use-toast";
 import SkipToContent from '@/components/SkipToContent';
 import { 
@@ -63,6 +63,7 @@ const LoginPage = () => {
   const { toast } = useToast();
   const [searchParams] = useSearchParams();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const navigate = useNavigate();
   const [isRegistering, setIsRegistering] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -165,11 +166,11 @@ const LoginPage = () => {
         <div className="w-full max-w-md">
           <Card className="shadow-primary">
           <CardHeader className="text-center">
-            <div className="w-16 h-16 bg-gradient-primary rounded-full flex items-center justify-center mx-auto mb-4" aria-hidden="true">
-              {isRegistering ? <UserPlus className="h-8 w-8 text-white" /> : 
-               isForgotPassword ? <ArrowLeft className="h-8 w-8 text-white" /> : 
-               <LogIn className="h-8 w-8 text-white" />}
-            </div>
+              <div className="w-16 h-16 bg-gradient-primary rounded-full flex items-center justify-center mx-auto mb-4" aria-hidden="true">
+                {isRegistering ? <UserPlus className="h-8 w-8 text-white" aria-hidden="true" /> : 
+                 isForgotPassword ? <ArrowLeft className="h-8 w-8 text-white" aria-hidden="true" /> : 
+                 <LogIn className="h-8 w-8 text-white" aria-hidden="true" />}
+              </div>
             <CardTitle ref={headingRef} tabIndex={-1} className="text-2xl font-bold outline-none">
               {isRegistering ? "Crear Cuenta" : 
                isForgotPassword ? "Recuperar Contraseña" : 
@@ -439,8 +440,7 @@ const LoginPage = () => {
                   if (isRegistering) {
                     toggleMode('login');
                   } else {
-                    // Redirigir a la nueva página de registro en lugar de alternar el modo
-                    window.location.href = '/register';
+                    navigate('/register');
                   }
                 }}
                 type="button"

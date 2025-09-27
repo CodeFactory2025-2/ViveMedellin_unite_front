@@ -262,8 +262,8 @@ const GroupDetailPage = () => {
                 <div className="grid md:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
-                        <Users className="h-5 w-5 text-primary" />
+                    <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
+                      <Users className="h-5 w-5 text-primary" aria-hidden="true" />
                       </div>
                       <div>
                         <p className="font-medium">Miembros</p>
@@ -272,8 +272,8 @@ const GroupDetailPage = () => {
                     </div>
                     
                     <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
-                        <MapPin className="h-5 w-5 text-primary" />
+                    <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
+                      <MapPin className="h-5 w-5 text-primary" aria-hidden="true" />
                       </div>
                       <div>
                         <p className="font-medium">Ubicación</p>
@@ -284,8 +284,8 @@ const GroupDetailPage = () => {
                   
                   <div className="space-y-4">
                     <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
-                        <Calendar className="h-5 w-5 text-primary" />
+                    <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
+                      <Calendar className="h-5 w-5 text-primary" aria-hidden="true" />
                       </div>
                       <div>
                         <p className="font-medium">Creado</p>
@@ -294,8 +294,8 @@ const GroupDetailPage = () => {
                     </div>
                     
                     <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
-                        <User className="h-5 w-5 text-primary" />
+                    <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center">
+                      <User className="h-5 w-5 text-primary" aria-hidden="true" />
                       </div>
                       <div>
                         <p className="font-medium">Administrador</p>
@@ -309,7 +309,7 @@ const GroupDetailPage = () => {
                 <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t">
                   {display.isAdmin ? (
                     <Badge variant="secondary" className="h-10 px-4 flex items-center justify-center">
-                      <User className="mr-2 h-4 w-4" />
+                      <User className="mr-2 h-4 w-4" aria-hidden="true" />
                       Eres el Administrador
                     </Badge>
                   ) : isMember ? (
@@ -333,7 +333,7 @@ const GroupDetailPage = () => {
                         <AlertDialogFooter>
                           <AlertDialogCancel>Cancelar</AlertDialogCancel>
                           <AlertDialogAction onClick={handleJoinGroup} disabled={isJoining}>
-                            {isJoining ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            {isJoining ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : null}
                             {isJoining ? 'Uniéndote…' : 'Aceptar y Unirse'}
                           </AlertDialogAction>
                         </AlertDialogFooter>
@@ -341,7 +341,7 @@ const GroupDetailPage = () => {
                     </AlertDialog>
                   )}
                   <Button variant="outline">
-                    <User className="mr-2 h-4 w-4" />
+                    <User className="mr-2 h-4 w-4" aria-hidden="true" />
                     Contactar Administrador
                   </Button>
                 </div>
