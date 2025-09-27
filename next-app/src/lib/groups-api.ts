@@ -1,8 +1,6 @@
 // src/lib/groups-api.ts
 // API simulada para la gestión de grupos
 
-import { User } from './api';
-
 // Tipos
 export interface Group {
   id: string;
@@ -625,6 +623,10 @@ export const createEvent = async (
 
 // Inicializar datos de prueba para grupos
 export const initializeMockGroupsData = (): void => {
+  if (!isBrowser) {
+    return;
+  }
+
   const existingGroups = getGroups();
   
   if (existingGroups.length === 0) {
@@ -733,4 +735,6 @@ export const initializeMockGroupsData = (): void => {
 };
 
 // Inicializar datos de prueba
-initializeMockGroupsData();
+if (typeof window !== "undefined") {
+  initializeMockGroupsData();
+}
