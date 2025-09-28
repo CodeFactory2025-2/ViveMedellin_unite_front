@@ -105,6 +105,13 @@ export interface CreateGroupPostRequest {
   authorName: string;
 }
 
+export interface CreateGroupPostCommentRequest {
+  postId: string;
+  content: string;
+  authorId: string;
+  authorName: string;
+}
+
 export interface GroupSummary {
   id: string;
   name: string;
@@ -660,7 +667,12 @@ export const getGroupPosts = async (groupId: string, userId: string): Promise<Ap
 
   return {
     success: true,
-    data: [...group.posts].sort((a, b) => b.createdAt - a.createdAt),
+    data: [...group.posts]
+      .map((post) => ({
+        ...post,
+        comments: [...post.comments].sort((a, b) => a.createdAt - b.createdAt),
+      }))
+      .sort((a, b) => b.createdAt - a.createdAt),
   };
 };
 
@@ -734,6 +746,151 @@ export const createGroupPost = async (
   return {
     success: true,
     data: newPost,
+  };
+};
+
+export const addCommentToPost = async (
+  groupId: string,
+  request: CreateGroupPostCommentRequest,
+  userId: string,
+): Promise<ApiResponse<GroupPostComment>> => {
+  await delay();
+
+  const groups = getGroups();
+  const groupIndex = groups.findIndex((g) => g.id === groupId);
+
+  if (groupIndex === -1) {
+    return {
+      success: false,
+      error: 'Grupo no encontrado',
+      status: 404,
+    };
+  }
+
+  const group = groups[groupIndex];
+  const isMember = group.creatorId === userId || group.members.some((member) => member.userId === userId);
+
+  if (!isMember) {
+    return {
+      success: false,
+      error: 'Debes ser miembro del grupo para comentar.',
+      status: 403,
+    };
+  }
+
+  const postIndex = group.posts.findIndex((post) => post.id === request.postId);
+  if (postIndex === -1) {
+    return {
+      success: false,
+      error: 'Publicación no encontrada',
+      status: 404,
+    };
+  }
+
+  const content = request.content.trim();
+  if (!content) {
+    return {
+      success: false,
+      error: 'El comentario no puede estar vacío.',
+      status: 422,
+    };
+  }
+
+  const newComment: GroupPostComment = {
+    id: generateId(),
+    postId: request.postId,
+    authorId: request.authorId,
+    authorName: request.authorName,
+    content,
+    createdAt: Date.now(),
+  };
+
+  const updatedPost: GroupPost = {
+    ...group.posts[postIndex],
+    comments: [...group.posts[postIndex].comments, newComment].sort((a, b) => a.createdAt - b.createdAt),
+  };
+
+  group.posts[postIndex] = updatedPost;
+  groups[groupIndex] = group;
+  saveGroups(groups);
+
+  pushNotification(
+    "group:new-comment",
+    `Nuevo comentario en ${group.name}`,
+    `${request.authorName} comentó una publicación`,
+    {
+      groupId,
+      postId: request.postId,
+      authorId: request.authorId,
+      commentId: newComment.id,
+    },
+  );
+
+  return {
+    success: true,
+    data: newComment,
+  };
+};
+
+export const deleteGroupPost = async (
+  groupId: string,
+  postId: string,
+  userId: string,
+): Promise<ApiResponse<GroupPost>> => {
+  await delay();
+
+  const groups = getGroups();
+  const groupIndex = groups.findIndex((g) => g.id === groupId);
+
+  if (groupIndex === -1) {
+    return {
+      success: false,
+      error: 'Grupo no encontrado',
+      status: 404,
+    };
+  }
+
+  const group = groups[groupIndex];
+  const postIndex = group.posts.findIndex((post) => post.id === postId);
+
+  if (postIndex === -1) {
+    return {
+      success: false,
+      error: 'Publicación no encontrada',
+      status: 404,
+    };
+  }
+
+  const post = group.posts[postIndex];
+  const isAuthor = post.authorId === userId;
+  const isAdmin = group.creatorId === userId || group.members.some((member) => member.userId === userId && member.role === 'admin');
+
+  if (!isAuthor && !isAdmin) {
+    return {
+      success: false,
+      error: 'No tienes permisos para eliminar esta publicación.',
+      status: 403,
+    };
+  }
+
+  group.posts.splice(postIndex, 1);
+  groups[groupIndex] = group;
+  saveGroups(groups);
+
+  pushNotification(
+    "system",
+    `Publicación eliminada en ${group.name}`,
+    `${post.authorName} retiró un mensaje del grupo.`,
+    {
+      groupId,
+      postId,
+      authorId: post.authorId,
+    },
+  );
+
+  return {
+    success: true,
+    data: post,
   };
 };
 
@@ -985,7 +1142,16 @@ export const initializeMockGroupsData = (): void => {
             authorName: 'Usuario Demo',
             content: '¡Bienvenidos! Este fin de semana haremos limpieza de senderos, confirmen asistencia en los comentarios.',
             createdAt: Date.now() - 86400000 * 6,
-            comments: [],
+            comments: [
+              {
+                id: 'c-101',
+                postId: 'p-101',
+                authorId: '2',
+                authorName: 'Administrador',
+                content: '¡Me apunto! Llevaré bolsas reciclables y guantes extra.',
+                createdAt: Date.now() - 86400000 * 5,
+              },
+            ],
           },
           {
             id: 'p-102',

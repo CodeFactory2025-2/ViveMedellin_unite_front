@@ -10,6 +10,7 @@ import {
   Calendar,
   User,
   Loader2,
+  Trash2,
 } from "lucide-react";
 
 import SkipToContent from "@/components/SkipToContent";
@@ -59,6 +60,10 @@ export default function GroupDetailPage() {
   const [posts, setPosts] = useState<GroupPost[]>([]);
   const [newPostContent, setNewPostContent] = useState("");
   const [isPosting, setIsPosting] = useState(false);
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [commentLoading, setCommentLoading] = useState<Record<string, boolean>>({});
+  const [postDeleting, setPostDeleting] = useState<Record<string, boolean>>({});
+  const [isDeletingGroup, setIsDeletingGroup] = useState(false);
 
   useEffect(() => {
     if (!slug || !user?.id) {
@@ -120,6 +125,18 @@ export default function GroupDetailPage() {
       setIsMember(group.members.some((member) => member.userId === user.id));
     }
   }, [group, user?.id]);
+
+  useEffect(() => {
+    setCommentDrafts((previous) => {
+      const draft = { ...previous };
+      posts.forEach((post) => {
+        if (!(post.id in draft)) {
+          draft[post.id] = "";
+        }
+      });
+      return draft;
+    });
+  }, [posts]);
 
   const handleJoinGroup = async () => {
     if (!group || !user?.id) {
@@ -290,6 +307,176 @@ export default function GroupDetailPage() {
       });
     } finally {
       setIsPosting(false);
+    }
+  };
+
+  const handleCommentSubmit = async (
+    event: React.FormEvent<HTMLFormElement>,
+    postId: string,
+  ) => {
+    event.preventDefault();
+
+    if (!group || !user?.id) {
+      toast({
+        title: "Acción no disponible",
+        description: "Debes iniciar sesión para comentar en el grupo.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const draft = commentDrafts[postId]?.trim() ?? "";
+    if (!draft) {
+      toast({
+        title: "Comentario vacío",
+        description: "Escribe un mensaje antes de enviar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setCommentLoading((previous) => ({ ...previous, [postId]: true }));
+
+    try {
+      const response = await groupsApi.addCommentToPost(
+        group.id,
+        {
+          postId,
+          content: draft,
+          authorId: user.id,
+          authorName: user.name || user.email || "Miembro del grupo",
+        },
+        user.id,
+      );
+
+      if (response.success && response.data) {
+        const newComment = response.data;
+        setPosts((previous) =>
+          previous.map((post) =>
+            post.id === postId
+              ? { ...post, comments: [...post.comments, newComment] }
+              : post,
+          ),
+        );
+        setGroup((prev) =>
+          prev
+            ? {
+                ...prev,
+                posts: prev.posts.map((post) =>
+                  post.id === postId
+                    ? { ...post, comments: [...post.comments, newComment] }
+                    : post,
+                ),
+              }
+            : prev,
+        );
+        setCommentDrafts((previous) => ({ ...previous, [postId]: "" }));
+        toast({
+          title: "Comentario enviado",
+          description: "Tu mensaje se publicó correctamente.",
+        });
+      } else {
+        toast({
+          title: "Error al comentar",
+          description: response.error || "No se pudo enviar el comentario.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error al comentar",
+        description:
+          error instanceof Error ? error.message : "Hubo un error técnico. Inténtalo nuevamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setCommentLoading((previous) => ({ ...previous, [postId]: false }));
+    }
+  };
+
+  const handleDeletePost = async (postId: string) => {
+    if (!group || !user?.id) {
+      toast({
+        title: "Acción no disponible",
+        description: "Debes iniciar sesión para gestionar las publicaciones.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setPostDeleting((previous) => ({ ...previous, [postId]: true }));
+
+    try {
+      const response = await groupsApi.deleteGroupPost(group.id, postId, user.id);
+      if (response.success) {
+        setPosts((previous) => previous.filter((post) => post.id !== postId));
+        setGroup((prev) =>
+          prev
+            ? {
+                ...prev,
+                posts: prev.posts.filter((post) => post.id !== postId),
+              }
+            : prev,
+        );
+        toast({
+          title: "Publicación eliminada",
+          description: "El contenido se eliminó correctamente.",
+        });
+      } else {
+        toast({
+          title: "No se pudo eliminar",
+          description: response.error || "Inténtalo nuevamente más tarde.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error al eliminar",
+        description:
+          error instanceof Error ? error.message : "Hubo un error técnico. Inténtalo nuevamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setPostDeleting((previous) => ({ ...previous, [postId]: false }));
+    }
+  };
+
+  const handleDeleteGroup = async () => {
+    if (!group || !user?.id) {
+      toast({
+        title: "Acción no disponible",
+        description: "Debes iniciar sesión nuevamente.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsDeletingGroup(true);
+
+    try {
+      const response = await groupsApi.deleteGroup(group.id, user.id);
+      if (response.success) {
+        toast({
+          title: "Grupo eliminado",
+          description: `"${group.name}" se ha eliminado exitosamente.`,
+        });
+        router.replace("/grupos");
+      } else {
+        toast({
+          title: "No se pudo eliminar",
+          description: response.error || "Inténtalo nuevamente más tarde.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error al eliminar",
+        description:
+          error instanceof Error ? error.message : "Hubo un error técnico. Inténtalo nuevamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeletingGroup(false);
     }
   };
 
@@ -508,10 +695,104 @@ export default function GroupDetailPage() {
                             {new Date(post.createdAt).toLocaleString()}
                           </p>
                         </div>
+                        {(display.isAdmin || post.authorId === user?.id) ? (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label="Eliminar publicación"
+                                disabled={postDeleting[post.id]}
+                              >
+                                {postDeleting[post.id] ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                                )}
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>¿Eliminar publicación?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Esta acción no se puede deshacer. La publicación se eliminará para todas las personas del grupo.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDeletePost(post.id)} disabled={postDeleting[post.id]}>
+                                  Eliminar
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        ) : null}
                       </div>
                       <p className="text-sm leading-relaxed text-muted-foreground mt-3 whitespace-pre-wrap">
                         {post.content}
                       </p>
+
+                      <div className="mt-4 space-y-2 border-t pt-3">
+                        <h3 className="text-sm font-semibold">Comentarios</h3>
+                        {post.comments.length ? (
+                          <ul className="space-y-2">
+                            {post.comments.map((comment) => (
+                              <li key={comment.id} className="rounded-md bg-muted/40 p-3">
+                                <p className="text-sm font-medium text-foreground">{comment.authorName}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {new Date(comment.createdAt).toLocaleString()}
+                                </p>
+                                <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap">
+                                  {comment.content}
+                                </p>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">Sé la primera persona en comentar.</p>
+                        )}
+
+                        {canCreatePost ? (
+                          <form
+                            onSubmit={(event) => handleCommentSubmit(event, post.id)}
+                            className="space-y-2"
+                          >
+                            <label htmlFor={`comment-${post.id}`} className="sr-only">
+                              Escribe un comentario para este grupo
+                            </label>
+                            <Textarea
+                              id={`comment-${post.id}`}
+                              placeholder="Comparte tu aporte..."
+                              value={commentDrafts[post.id] ?? ""}
+                              onChange={(event) =>
+                                setCommentDrafts((previous) => ({
+                                  ...previous,
+                                  [post.id]: event.target.value,
+                                }))
+                              }
+                              maxLength={500}
+                              rows={2}
+                              disabled={commentLoading[post.id]}
+                            />
+                            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                              <span>Máximo 500 caracteres.</span>
+                              <span>{(commentDrafts[post.id] ?? "").trim().length}/500</span>
+                            </div>
+                            <div className="flex justify-end">
+                              <Button type="submit" size="sm" disabled={commentLoading[post.id]}>
+                                {commentLoading[post.id] ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                                    Enviando...
+                                  </>
+                                ) : (
+                                  "Comentar"
+                                )}
+                              </Button>
+                            </div>
+                          </form>
+                        ) : null}
+                      </div>
                     </div>
                   ))
                 ) : (
@@ -606,6 +887,37 @@ export default function GroupDetailPage() {
               <Button variant="outline" size="lg" className="sm:w-auto">
                 Contactar Administrador
               </Button>
+              {display.isAdmin ? (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="destructive"
+                      size="lg"
+                      className="sm:w-auto"
+                      disabled={isDeletingGroup}
+                    >
+                      {isDeletingGroup ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                      ) : null}
+                      {isDeletingGroup ? "Eliminando..." : "Eliminar grupo"}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>¿Eliminar el grupo?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Esta acción eliminará &quot;{display.name}&quot; y todas sus publicaciones. No se puede deshacer.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleDeleteGroup} disabled={isDeletingGroup}>
+                        Confirmar
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              ) : null}
             </div>
           </CardContent>
         </Card>

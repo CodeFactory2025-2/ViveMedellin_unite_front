@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useEffect, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Users, Activity, ClipboardList } from "lucide-react";
 
@@ -42,52 +42,45 @@ function DashboardContent() {
   const router = useRouter();
   const [summary, setSummary] = useState<GroupActivitySummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  useEffect(() => {
-    let active = true;
+  const fetchSummary = useCallback(async () => {
+    if (!user?.id) {
+      return;
+    }
 
-    const fetchSummary = async () => {
-      if (!user?.id) {
-        return;
-      }
+    setIsRefreshing(true);
+    if (!summary) {
       setIsLoading(true);
-      try {
-        const response = await groupsApi.getGroupActivitySummary(user.id);
-        if (!active) {
-          return;
-        }
-        if (response.success && response.data) {
-          setSummary(response.data);
-        } else {
-          toast({
-            title: "No se pudo cargar el tablero",
-            description: response.error || "Inténtalo nuevamente.",
-            variant: "destructive",
-          });
-        }
-      } catch (error) {
-        if (!active) {
-          return;
-        }
-        console.error("Error obteniendo métricas", error);
+    }
+
+    try {
+      const response = await groupsApi.getGroupActivitySummary(user.id);
+      if (response.success && response.data) {
+        setSummary(response.data);
+      } else {
         toast({
-          title: "Error",
-          description: "Ocurrió un error al consultar el tablero.",
+          title: "No se pudo cargar el tablero",
+          description: response.error || "Inténtalo nuevamente.",
           variant: "destructive",
         });
-      } finally {
-        if (active) {
-          setIsLoading(false);
-        }
       }
-    };
+    } catch (error) {
+      console.error("Error obteniendo métricas", error);
+      toast({
+        title: "Error",
+        description: "Ocurrió un error al consultar el tablero.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, [summary, user?.id]);
 
+  useEffect(() => {
     void fetchSummary();
-
-    return () => {
-      active = false;
-    };
-  }, [user?.id]);
+  }, [fetchSummary]);
 
   const loadingState = isLoading && !summary;
 
@@ -102,9 +95,14 @@ function DashboardContent() {
           </div>
           <div className="flex items-center gap-2">
             <NotificationsBell />
-            <Button variant="outline" size="sm" onClick={() => router.back()}>
-              Volver
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={fetchSummary} disabled={isRefreshing}>
+                {isRefreshing ? "Actualizando..." : "Actualizar"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => router.back()}>
+                Volver
+              </Button>
+            </div>
           </div>
         </div>
       </header>

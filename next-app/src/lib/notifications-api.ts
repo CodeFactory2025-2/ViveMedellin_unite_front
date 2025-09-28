@@ -5,6 +5,7 @@ export type NotificationType =
   | "group:new-member"
   | "group:member-left"
   | "group:new-post"
+  | "group:new-comment"
   | "system";
 
 export interface NotificationPayload {
@@ -82,4 +83,3 @@ export const clearNotifications = () => {
   window.localStorage.removeItem(NOTIFICATIONS_KEY);
   window.dispatchEvent(new Event("notifications:updated"));
 };
-
