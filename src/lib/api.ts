@@ -102,7 +102,8 @@ export const register = async (credentials: RegisterCredentials): Promise<ApiRes
   // Simulamos envío de correo de verificación
   console.log(`[API] Correo de verificación enviado a ${credentials.email} con token: ${verificationToken}`);
   
-  const { password, ...userWithoutPassword } = newUser;
+  const { password: _password, ...userWithoutPassword } = newUser;
+  void _password;
   
   return {
     success: true,
@@ -182,6 +183,10 @@ export const login = async (credentials: LoginCredentials): Promise<ApiResponse<
     resetPasswordExpires: _resetPasswordExpires,
     ...userWithoutSensitiveInfo
   } = user;
+  void _password;
+  void _verificationToken;
+  void _resetPasswordToken;
+  void _resetPasswordExpires;
   
   return {
     success: true,
@@ -344,7 +349,17 @@ export const updateUserProfile = async (userId: string, updates: Partial<Omit<Us
   
   saveUsers(users);
   
-  const { password, verificationToken, resetPasswordToken, resetPasswordExpires, ...userWithoutSensitiveInfo } = users[userIndex];
+  const {
+    password: _updatedPassword,
+    verificationToken: _updatedVerificationToken,
+    resetPasswordToken: _updatedResetToken,
+    resetPasswordExpires: _updatedResetExpires,
+    ...userWithoutSensitiveInfo
+  } = users[userIndex];
+  void _updatedPassword;
+  void _updatedVerificationToken;
+  void _updatedResetToken;
+  void _updatedResetExpires;
   
   return {
     success: true,

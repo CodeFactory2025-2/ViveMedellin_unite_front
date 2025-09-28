@@ -1,8 +1,11 @@
-/* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { toast } from '@/hooks/use-toast';
-import * as api from '@/lib/api';
+"use client";
+
+import React, { createContext, useContext, useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "@/hooks/use-toast";
+import * as api from "@/lib/api";
+
+const isBrowser = typeof window !== "undefined";
 
 interface UserCredentials {
   email: string;
@@ -34,7 +37,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 };
@@ -43,7 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [pendingRedirect, setPendingRedirect] = useState<string | null>(null);
-  const navigate = useNavigate();
+  const router = useRouter();
 
   // Verificación de sesión al montar el componente
   useEffect(() => {
@@ -56,14 +59,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setIsAuthenticated(true);
         }
       } catch (error) {
-        console.error('Error checking auth status:', error);
-        localStorage.removeItem('vive-medellin-user');
-        sessionStorage.removeItem('vive-medellin-user');
-        localStorage.removeItem('vive-medellin-auth-token');
-        sessionStorage.removeItem('vive-medellin-auth-token');
+        console.error("Error checking auth status:", error);
+        if (isBrowser) {
+          window.localStorage.removeItem("vive-medellin-user");
+          window.sessionStorage.removeItem("vive-medellin-user");
+          window.localStorage.removeItem("vive-medellin-auth-token");
+          window.sessionStorage.removeItem("vive-medellin-auth-token");
+        }
       }
     };
-    
+
     checkAuthStatus();
   }, []);
 
@@ -90,14 +95,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         // Si seleccionó 'recordarme', almacenamos en localStorage para persistencia
         // De lo contrario, usamos sessionStorage que se borra al cerrar el navegador
-        if (rememberMe) {
-          localStorage.setItem('vive-medellin-user', userData);
-          localStorage.setItem('vive-medellin-auth-token', token);
-        } else {
-          sessionStorage.setItem('vive-medellin-user', userData);
-          sessionStorage.setItem('vive-medellin-auth-token', token);
+        if (isBrowser) {
+          if (rememberMe) {
+            window.localStorage.setItem("vive-medellin-user", userData);
+            window.localStorage.setItem("vive-medellin-auth-token", token);
+          } else {
+            window.sessionStorage.setItem("vive-medellin-user", userData);
+            window.sessionStorage.setItem("vive-medellin-auth-token", token);
+          }
         }
-        
+
         toast({
           title: "¡Bienvenido a ViveMedellín!",
           description: "Has iniciado sesión correctamente.",
@@ -109,7 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         // Pequeña pausa para permitir que el toast se muestre correctamente
         setTimeout(() => {
-          navigate(redirectPath);
+          router.replace(redirectPath);
         }, 300);
         
         return true;
@@ -168,30 +175,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     try {
       await api.logout();
-      
+
       setIsAuthenticated(false);
       setUser(null);
-      
+
       toast({
         title: "Sesión cerrada",
         description: "Has cerrado sesión correctamente.",
       });
-      
-      navigate('/');
+
+      router.replace("/");
     } catch (error) {
       console.error("Error al cerrar sesión:", error);
-      
+
       // Incluso si hay error, cerramos la sesión localmente
       setIsAuthenticated(false);
       setUser(null);
-      navigate('/');
+      router.replace("/");
     }
   };
   
   const resetPassword = async (email: string): Promise<boolean> => {
     try {
-      const response = await api.requestPasswordReset(email);
-      
+      await api.requestPasswordReset(email);
+
       // Siempre mostramos un mensaje de éxito por razones de seguridad
       // (no queremos revelar qué correos están registrados)
       toast({

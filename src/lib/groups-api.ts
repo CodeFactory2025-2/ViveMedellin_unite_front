@@ -1,16 +1,35 @@
 // src/lib/groups-api.ts
 // API simulada para la gestión de grupos
 
-import { User } from './api';
+import { addNotification, type NotificationType } from "@/lib/notifications-api";
 
 // Tipos
+export interface GroupPostComment {
+  id: string;
+  postId: string;
+  authorId: string;
+  authorName: string;
+  content: string;
+  createdAt: number;
+}
+
+export interface GroupPost {
+  id: string;
+  groupId: string;
+  authorId: string;
+  authorName: string;
+  content: string;
+  createdAt: number;
+  comments: GroupPostComment[];
+}
+
 export interface Group {
   id: string;
   slug: string;
   name: string;
   description: string;
   category: string;
-  theme?: string;           // Tema específico del grupo
+  theme?: string; // Tema específico del grupo
   participationRules?: string; // Reglas de participación
   location?: {
     latitude: number;
@@ -22,6 +41,7 @@ export interface Group {
   createdAt: number;
   members: GroupMember[];
   events: Event[];
+  posts: GroupPost[];
   isPublic: boolean;
 }
 
@@ -79,6 +99,42 @@ export interface UpdateGroupRequest {
   isPublic?: boolean;
 }
 
+export interface CreateGroupPostRequest {
+  content: string;
+  authorId: string;
+  authorName: string;
+}
+
+export interface CreateGroupPostCommentRequest {
+  postId: string;
+  content: string;
+  authorId: string;
+  authorName: string;
+}
+
+export interface GroupSummary {
+  id: string;
+  name: string;
+  slug: string;
+  memberCount: number;
+  postCount: number;
+  isPublic: boolean;
+}
+
+export interface GroupMemberActivity {
+  groupId: string;
+  userId: string;
+  role: GroupMember["role"];
+  joinedAt: number;
+}
+
+export interface GroupActivitySummary {
+  topByMembers: GroupSummary[];
+  topByPosts: GroupSummary[];
+  recentPosts: Array<GroupPost & { groupName: string; groupSlug: string; isPublic: boolean }>;
+  recentMembers: Array<GroupMemberActivity & { groupSlug: string; groupName: string; isPublic: boolean }>;
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
@@ -93,6 +149,62 @@ const isBrowser = typeof window !== "undefined";
 // Utilidades
 const generateId = (): string => {
   return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+};
+
+type StoredGroup = Partial<Group> & {
+  members?: unknown;
+  events?: unknown;
+  posts?: unknown;
+};
+
+const normalizeGroup = (group: StoredGroup): Group => {
+  const members = Array.isArray(group?.members) ? group.members : [];
+  const events = Array.isArray(group?.events) ? group.events : [];
+  const posts = Array.isArray(group?.posts)
+    ? (group.posts as GroupPost[]).map((post) => ({
+        ...post,
+        comments: Array.isArray(post?.comments) ? post.comments : [],
+      }))
+    : [];
+
+  return {
+    id: group?.id ?? generateId(),
+    slug: group?.slug ?? slugify(group?.name ?? "grupo"),
+    name: group?.name ?? "Grupo sin nombre",
+    description: group?.description ?? "",
+    category: group?.category ?? "general",
+    theme: group?.theme ?? undefined,
+    participationRules: group?.participationRules ?? undefined,
+    location: group?.location,
+    imageUrl: group?.imageUrl,
+    creatorId: group?.creatorId ?? "",
+    createdAt: typeof group?.createdAt === "number" ? group.createdAt : Date.now(),
+    members,
+    events,
+    posts: posts.sort((a, b) => b.createdAt - a.createdAt),
+    isPublic: typeof group?.isPublic === "boolean" ? group.isPublic : true,
+  } as Group;
+};
+
+const pushNotification = (
+  type: NotificationType,
+  title: string,
+  message: string,
+  data?: Record<string, unknown>,
+) => {
+  if (!isBrowser) {
+    return;
+  }
+
+  addNotification({
+    id: generateId(),
+    type,
+    title,
+    message,
+    createdAt: Date.now(),
+    read: false,
+    data,
+  });
 };
 
 const getGroups = (): Group[] => {
@@ -119,7 +231,7 @@ const getGroups = (): Group[] => {
     saveGroups([]);
   }
 
-  return ensureSlugs(array as Group[]);
+  return ensureSlugs(array);
 };
 
 const saveGroups = (groups: Group[]): void => {
@@ -153,20 +265,22 @@ const makeUniqueSlug = (baseSlug: string, reserved: Set<string>): string => {
   return candidate;
 };
 
-const ensureSlugs = (groups: Group[]): Group[] => {
+const ensureSlugs = (groups: StoredGroup[]): Group[] => {
   let updated = false;
   const reserved = new Set<string>();
-  const withSlugs = groups.map((group) => {
-    let slug = group.slug || slugify(group.name) || 'grupo';
+  const withSlugs = groups.map((rawGroup) => {
+    const normalized = normalizeGroup(rawGroup);
+
+    let slug = normalized.slug || slugify(normalized.name) || 'grupo';
     if (reserved.has(slug)) {
       slug = makeUniqueSlug(slug, reserved);
     }
     reserved.add(slug);
-    if (slug !== group.slug) {
+    if (slug !== normalized.slug) {
       updated = true;
-      return { ...group, slug };
+      return { ...normalized, slug };
     }
-    return group;
+    return normalized;
   });
 
   if (updated) {
@@ -309,6 +423,7 @@ export const createGroup = async (request: CreateGroupRequest, userId: string): 
       }
     ],
     events: [],
+    posts: [],
     isPublic: request.isPublic
   };
   
@@ -448,6 +563,17 @@ export const joinGroup = async (groupId: string, userId: string): Promise<ApiRes
   
   groups[groupIndex] = group;
   saveGroups(groups);
+
+  pushNotification(
+    "group:new-member",
+    "Nuevo miembro en el grupo",
+    `${userId} se ha unido a ${group.name}.`,
+    {
+      groupId,
+      userId,
+      memberCount: group.members.length,
+    },
+  );
   
   return {
     success: true,
@@ -458,7 +584,7 @@ export const joinGroup = async (groupId: string, userId: string): Promise<ApiRes
 /**
  * Abandona un grupo
  */
-export const leaveGroup = async (groupId: string, userId: string): Promise<ApiResponse<null>> => {
+export const leaveGroup = async (groupId: string, userId: string): Promise<ApiResponse<Group>> => {
   await delay();
   
   const groups = getGroups();
@@ -494,9 +620,400 @@ export const leaveGroup = async (groupId: string, userId: string): Promise<ApiRe
   
   groups[groupIndex] = group;
   saveGroups(groups);
+
+  pushNotification(
+    "group:member-left",
+    "Miembro ha salido del grupo",
+    `${userId} ha salido de ${group.name}.`,
+    {
+      groupId,
+      userId,
+      memberCount: group.members.length,
+    },
+  );
   
   return {
-    success: true
+    success: true,
+    data: group
+  };
+};
+
+/**
+ * Obtiene las publicaciones de un grupo
+ */
+export const getGroupPosts = async (groupId: string, userId: string): Promise<ApiResponse<GroupPost[]>> => {
+  await delay();
+
+  const groups = getGroups();
+  const group = groups.find((g) => g.id === groupId);
+
+  if (!group) {
+    return {
+      success: false,
+      error: 'Grupo no encontrado',
+      status: 404,
+    };
+  }
+
+  const hasAccess = group.isPublic || group.members.some((member) => member.userId === userId) || group.creatorId === userId;
+
+  if (!hasAccess) {
+    return {
+      success: false,
+      error: 'No tienes permiso para ver las publicaciones de este grupo',
+      status: 403,
+    };
+  }
+
+  return {
+    success: true,
+    data: [...group.posts]
+      .map((post) => ({
+        ...post,
+        comments: [...post.comments].sort((a, b) => a.createdAt - b.createdAt),
+      }))
+      .sort((a, b) => b.createdAt - a.createdAt),
+  };
+};
+
+/**
+ * Crea una nueva publicación dentro del grupo
+ */
+export const createGroupPost = async (
+  groupId: string,
+  request: CreateGroupPostRequest,
+  userId: string,
+): Promise<ApiResponse<GroupPost>> => {
+  await delay();
+
+  const groups = getGroups();
+  const groupIndex = groups.findIndex((g) => g.id === groupId);
+
+  if (groupIndex === -1) {
+    return {
+      success: false,
+      error: 'Grupo no encontrado',
+      status: 404,
+    };
+  }
+
+  const group = groups[groupIndex];
+  const isMember = group.creatorId === userId || group.members.some((member) => member.userId === userId);
+
+  if (!isMember) {
+    return {
+      success: false,
+      error: 'Debes ser miembro del grupo para publicar.',
+      status: 403,
+    };
+  }
+
+  const content = request.content.trim();
+  if (!content) {
+    return {
+      success: false,
+      error: 'El contenido de la publicación no puede estar vacío.',
+      status: 422,
+    };
+  }
+
+  const newPost: GroupPost = {
+    id: generateId(),
+    groupId,
+    authorId: request.authorId,
+    authorName: request.authorName,
+    content,
+    createdAt: Date.now(),
+    comments: [],
+  };
+
+  group.posts = [newPost, ...group.posts];
+  groups[groupIndex] = group;
+  saveGroups(groups);
+
+  const preview = content.length > 80 ? `${content.slice(0, 77)}...` : content;
+  pushNotification(
+    "group:new-post",
+    `Nueva publicación en ${group.name}`,
+    `${request.authorName} compartió: ${preview}`,
+    {
+      groupId,
+      postId: newPost.id,
+      authorId: request.authorId,
+    },
+  );
+
+  return {
+    success: true,
+    data: newPost,
+  };
+};
+
+export const addCommentToPost = async (
+  groupId: string,
+  request: CreateGroupPostCommentRequest,
+  userId: string,
+): Promise<ApiResponse<GroupPostComment>> => {
+  await delay();
+
+  const groups = getGroups();
+  const groupIndex = groups.findIndex((g) => g.id === groupId);
+
+  if (groupIndex === -1) {
+    return {
+      success: false,
+      error: 'Grupo no encontrado',
+      status: 404,
+    };
+  }
+
+  const group = groups[groupIndex];
+  const isMember = group.creatorId === userId || group.members.some((member) => member.userId === userId);
+
+  if (!isMember) {
+    return {
+      success: false,
+      error: 'Debes ser miembro del grupo para comentar.',
+      status: 403,
+    };
+  }
+
+  const postIndex = group.posts.findIndex((post) => post.id === request.postId);
+  if (postIndex === -1) {
+    return {
+      success: false,
+      error: 'Publicación no encontrada',
+      status: 404,
+    };
+  }
+
+  const content = request.content.trim();
+  if (!content) {
+    return {
+      success: false,
+      error: 'El comentario no puede estar vacío.',
+      status: 422,
+    };
+  }
+
+  const newComment: GroupPostComment = {
+    id: generateId(),
+    postId: request.postId,
+    authorId: request.authorId,
+    authorName: request.authorName,
+    content,
+    createdAt: Date.now(),
+  };
+
+  const updatedPost: GroupPost = {
+    ...group.posts[postIndex],
+    comments: [...group.posts[postIndex].comments, newComment].sort((a, b) => a.createdAt - b.createdAt),
+  };
+
+  group.posts[postIndex] = updatedPost;
+  groups[groupIndex] = group;
+  saveGroups(groups);
+
+  pushNotification(
+    "group:new-comment",
+    `Nuevo comentario en ${group.name}`,
+    `${request.authorName} comentó una publicación`,
+    {
+      groupId,
+      postId: request.postId,
+      authorId: request.authorId,
+      commentId: newComment.id,
+    },
+  );
+
+  return {
+    success: true,
+    data: newComment,
+  };
+};
+
+export const deleteGroupPost = async (
+  groupId: string,
+  postId: string,
+  userId: string,
+): Promise<ApiResponse<GroupPost>> => {
+  await delay();
+
+  const groups = getGroups();
+  const groupIndex = groups.findIndex((g) => g.id === groupId);
+
+  if (groupIndex === -1) {
+    return {
+      success: false,
+      error: 'Grupo no encontrado',
+      status: 404,
+    };
+  }
+
+  const group = groups[groupIndex];
+  const postIndex = group.posts.findIndex((post) => post.id === postId);
+
+  if (postIndex === -1) {
+    return {
+      success: false,
+      error: 'Publicación no encontrada',
+      status: 404,
+    };
+  }
+
+  const post = group.posts[postIndex];
+  const isAuthor = post.authorId === userId;
+  const isAdmin = group.creatorId === userId || group.members.some((member) => member.userId === userId && member.role === 'admin');
+
+  if (!isAuthor && !isAdmin) {
+    return {
+      success: false,
+      error: 'No tienes permisos para eliminar esta publicación.',
+      status: 403,
+    };
+  }
+
+  group.posts.splice(postIndex, 1);
+  groups[groupIndex] = group;
+  saveGroups(groups);
+
+  pushNotification(
+    "system",
+    `Publicación eliminada en ${group.name}`,
+    `${post.authorName} retiró un mensaje del grupo.`,
+    {
+      groupId,
+      postId,
+      authorId: post.authorId,
+    },
+  );
+
+  return {
+    success: true,
+    data: post,
+  };
+};
+
+export const deletePostComment = async (
+  groupId: string,
+  postId: string,
+  commentId: string,
+  userId: string,
+): Promise<ApiResponse<GroupPostComment>> => {
+  await delay();
+
+  const groups = getGroups();
+  const groupIndex = groups.findIndex((g) => g.id === groupId);
+
+  if (groupIndex === -1) {
+    return {
+      success: false,
+      error: 'Grupo no encontrado',
+      status: 404,
+    };
+  }
+
+  const group = groups[groupIndex];
+  const postIndex = group.posts.findIndex((post) => post.id === postId);
+
+  if (postIndex === -1) {
+    return {
+      success: false,
+      error: 'Publicación no encontrada',
+      status: 404,
+    };
+  }
+
+  const commentIndex = group.posts[postIndex].comments.findIndex((comment) => comment.id === commentId);
+
+  if (commentIndex === -1) {
+    return {
+      success: false,
+      error: 'Comentario no encontrado',
+      status: 404,
+    };
+  }
+
+  const comment = group.posts[postIndex].comments[commentIndex];
+  const isAuthor = comment.authorId === userId;
+  const isAdmin = group.creatorId === userId || group.members.some((member) => member.userId === userId && member.role === 'admin');
+
+  if (!isAuthor && !isAdmin) {
+    return {
+      success: false,
+      error: 'No tienes permisos para eliminar este comentario.',
+      status: 403,
+    };
+  }
+
+  group.posts[postIndex].comments.splice(commentIndex, 1);
+  groups[groupIndex] = group;
+  saveGroups(groups);
+
+  return {
+    success: true,
+    data: comment,
+  };
+};
+
+/**
+ * Marca métricas de actividad de grupos
+ */
+export const getGroupActivitySummary = async (userId?: string): Promise<ApiResponse<GroupActivitySummary>> => {
+  await delay();
+
+  const groups = getGroups();
+  const accessibleGroups = typeof userId === 'string'
+    ? groups.filter((group) => group.isPublic || group.creatorId === userId || group.members.some((member) => member.userId === userId))
+    : groups;
+
+  const summaries = accessibleGroups.map((group) => ({
+    id: group.id,
+    name: group.name,
+    slug: group.slug,
+    memberCount: group.members.length,
+    postCount: group.posts.length,
+    isPublic: group.isPublic,
+  }));
+
+  const topByMembers = [...summaries].sort((a, b) => b.memberCount - a.memberCount).slice(0, 5);
+  const topByPosts = [...summaries].sort((a, b) => b.postCount - a.postCount).slice(0, 5);
+
+  const recentPosts = accessibleGroups
+    .flatMap((group) =>
+      group.posts.map((post) => ({
+        ...post,
+        groupName: group.name,
+        groupSlug: group.slug,
+        isPublic: group.isPublic,
+      })),
+    )
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 8);
+
+  const recentMembers = accessibleGroups
+    .flatMap((group) =>
+      group.members.map((member) => ({
+        groupId: group.id,
+        groupSlug: group.slug,
+        groupName: group.name,
+        isPublic: group.isPublic,
+        userId: member.userId,
+        role: member.role,
+        joinedAt: member.joinedAt,
+      })),
+    )
+    .sort((a, b) => b.joinedAt - a.joinedAt)
+    .slice(0, 8);
+
+  return {
+    success: true,
+    data: {
+      topByMembers,
+      topByPosts,
+      recentPosts,
+      recentMembers,
+    },
   };
 };
 
@@ -625,6 +1142,10 @@ export const createEvent = async (
 
 // Inicializar datos de prueba para grupos
 export const initializeMockGroupsData = (): void => {
+  if (!isBrowser) {
+    return;
+  }
+
   const existingGroups = getGroups();
   
   if (existingGroups.length === 0) {
@@ -675,6 +1196,35 @@ export const initializeMockGroupsData = (): void => {
             createdAt: Date.now() - 86400000 * 7
           }
         ],
+        posts: [
+          {
+            id: 'p-101',
+            groupId: '1',
+            authorId: '1',
+            authorName: 'Usuario Demo',
+            content: '¡Bienvenidos! Este fin de semana haremos limpieza de senderos, confirmen asistencia en los comentarios.',
+            createdAt: Date.now() - 86400000 * 6,
+            comments: [
+              {
+                id: 'c-101',
+                postId: 'p-101',
+                authorId: '2',
+                authorName: 'Administrador',
+                content: '¡Me apunto! Llevaré bolsas reciclables y guantes extra.',
+                createdAt: Date.now() - 86400000 * 5,
+              },
+            ],
+          },
+          {
+            id: 'p-102',
+            groupId: '1',
+            authorId: '2',
+            authorName: 'Administrador',
+            content: 'Compartimos fotos de la última caminata. ¡Gracias por participar!',
+            createdAt: Date.now() - 86400000 * 4,
+            comments: [],
+          },
+        ],
         isPublic: true
       },
       {
@@ -699,6 +1249,17 @@ export const initializeMockGroupsData = (): void => {
           }
         ],
         events: [],
+        posts: [
+          {
+            id: 'p-201',
+            groupId: '2',
+            authorId: '2',
+            authorName: 'Administrador',
+            content: 'Este sábado entregaremos kits escolares en la vereda El Salado. Necesitamos voluntarios con transporte.',
+            createdAt: Date.now() - 86400000 * 3,
+            comments: [],
+          },
+        ],
         isPublic: true
       },
       {
@@ -723,6 +1284,17 @@ export const initializeMockGroupsData = (): void => {
           }
         ],
         events: [],
+        posts: [
+          {
+            id: 'p-301',
+            groupId: '3',
+            authorId: '1',
+            authorName: 'Usuario Demo',
+            content: 'Libro del mes: “El olvido que seremos”. Nos reunimos el próximo miércoles a las 7 p. m.',
+            createdAt: Date.now() - 86400000 * 2,
+            comments: [],
+          },
+        ],
         isPublic: false // Este es un grupo privado
       }
     ];
@@ -733,4 +1305,6 @@ export const initializeMockGroupsData = (): void => {
 };
 
 // Inicializar datos de prueba
-initializeMockGroupsData();
+if (typeof window !== "undefined") {
+  initializeMockGroupsData();
+}

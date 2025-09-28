@@ -1,5 +1,9 @@
+"use client";
+
+import type { ReactNode } from "react";
+
 import { useToast } from "@/hooks/use-toast";
-import { Toast, ToastClose, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from "@/components/ui/toast";
+import { Toast, ToastClose, ToastProvider, ToastTitle, ToastViewport } from "@/components/ui/toast";
 
 export function Toaster() {
   const { toasts } = useToast();
@@ -11,9 +15,11 @@ export function Toaster() {
           <Toast key={id} {...props}>
             <div className="grid gap-1">
               {title && <ToastTitle>{title}</ToastTitle>}
-              {description && <ToastDescription>{description}</ToastDescription>}
+              {description ? (
+                <div className="text-sm opacity-90">{description as ReactNode}</div>
+              ) : null}
             </div>
-            {action}
+            {action ? <div>{action}</div> : null}
             <ToastClose />
           </Toast>
         );
