@@ -14,6 +14,7 @@ import {
 
 import SkipToContent from "@/components/SkipToContent";
 import { RequireAuth } from "@/components/require-auth";
+import { NotificationsBell } from "@/components/notifications-bell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -34,10 +35,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import * as groupsApi from "@/lib/groups-api";
-import type { Group } from "@/lib/groups-api";
+import type { Group, GroupPost } from "@/lib/groups-api";
 
 const DEFAULT_LOCATION = "Medellín, Colombia";
 
@@ -53,6 +55,10 @@ export default function GroupDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [isJoining, setIsJoining] = useState(false);
   const [isMember, setIsMember] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
+  const [posts, setPosts] = useState<GroupPost[]>([]);
+  const [newPostContent, setNewPostContent] = useState("");
+  const [isPosting, setIsPosting] = useState(false);
 
   useEffect(() => {
     if (!slug || !user?.id) {
@@ -76,10 +82,12 @@ export default function GroupDetailPage() {
             ...response.data,
             members: [...response.data.members],
             events: [...response.data.events],
+            posts: [...response.data.posts],
           };
 
           setGroup(hydratedGroup);
           setIsMember(hydratedGroup.members.some((member) => member.userId === user.id));
+          setPosts(hydratedGroup.posts ?? []);
         } else {
           setError(response.error || "No fue posible cargar el grupo.");
         }
@@ -133,9 +141,11 @@ export default function GroupDetailPage() {
           ...response.data,
           members: [...response.data.members],
           events: [...response.data.events],
+          posts: [...response.data.posts],
         };
         setGroup(hydratedGroup);
         setIsMember(true);
+        setPosts(hydratedGroup.posts ?? []);
         toast({
           title: "¡Bienvenida al grupo! 🎉",
           description: `Te has unido a "${hydratedGroup.name}" exitosamente.`,
@@ -158,6 +168,128 @@ export default function GroupDetailPage() {
       });
     } finally {
       setIsJoining(false);
+    }
+  };
+
+  const handleLeaveGroup = async () => {
+    if (!group || !user?.id) {
+      toast({
+        title: "No fue posible abandonar el grupo",
+        description: "Debes iniciar sesión nuevamente para completar esta acción.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsLeaving(true);
+
+    try {
+      const response = await groupsApi.leaveGroup(group.id, user.id);
+
+      if (response.success && response.data) {
+        const hydratedGroup: Group = {
+          ...response.data,
+          members: [...response.data.members],
+          events: [...response.data.events],
+          posts: [...response.data.posts],
+        };
+
+        setGroup(hydratedGroup);
+        setIsMember(false);
+        setPosts(hydratedGroup.posts ?? []);
+
+        toast({
+          title: "Has abandonado el grupo",
+          description: `Has salido de "${hydratedGroup.name}" correctamente.`,
+        });
+      } else {
+        toast({
+          title: "No fue posible abandonar el grupo",
+          description: response.error || "Inténtalo de nuevo más tarde.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "No fue posible abandonar el grupo",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Hubo un error técnico. Inténtalo nuevamente más tarde.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLeaving(false);
+    }
+  };
+
+  const handleCreatePost = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!group || !user?.id) {
+      toast({
+        title: "Acción no disponible",
+        description: "Debes iniciar sesión para publicar en el grupo.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const content = newPostContent.trim();
+    if (!content) {
+      toast({
+        title: "Publicación vacía",
+        description: "Escribe un mensaje antes de publicar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsPosting(true);
+
+    try {
+      const response = await groupsApi.createGroupPost(
+        group.id,
+        {
+          content,
+          authorId: user.id,
+          authorName: user.name || user.email || "Miembro del grupo",
+        },
+        user.id,
+      );
+
+      if (response.success && response.data) {
+        const createdPost = response.data;
+        setPosts((previous) => [createdPost, ...previous]);
+        setGroup((prev) =>
+          prev
+            ? {
+                ...prev,
+                posts: [createdPost, ...(prev.posts ?? [])],
+              }
+            : prev,
+        );
+        setNewPostContent("");
+        toast({
+          title: "Publicación creada",
+          description: "Tu mensaje ahora es visible para el grupo.",
+        });
+      } else {
+        toast({
+          title: "Error al publicar",
+          description: response.error || "No se pudo publicar en el grupo.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error al publicar",
+        description:
+          error instanceof Error ? error.message : "Hubo un error técnico. Inténtalo nuevamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsPosting(false);
     }
   };
 
@@ -190,6 +322,7 @@ export default function GroupDetailPage() {
   }, [group, user?.email, user?.id, user?.name]);
 
   const canJoin = Boolean(group) && Boolean(display?.isPublic) && !display?.isAdmin && !isMember;
+  const canCreatePost = Boolean(group) && (display?.isAdmin || isMember);
 
   const renderHeader = () => (
     <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -203,6 +336,7 @@ export default function GroupDetailPage() {
           </span>
         </Link>
         <div className="flex items-center space-x-4">
+          <NotificationsBell />
           <Button
             variant="ghost"
             onClick={() => router.push("/grupos")}
@@ -315,44 +449,161 @@ export default function GroupDetailPage() {
               </p>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t">
-              {isMember ? (
-                <Button size="lg" disabled>
-                  Ya eres miembro
-                </Button>
-              ) : canJoin ? (
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button size="lg" className="mt-4 sm:mt-0">
-                      Unirse al Grupo
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>
-                        ¿Confirmas que quieres unirte al grupo?
-                      </AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Pasarás a ser miembro de &quot;{display.name}&quot; y podrías recibir notificaciones.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                      <AlertDialogAction onClick={handleJoinGroup} disabled={isJoining}>
-                        {isJoining ? (
+            <div className="pt-6 border-t space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <h2 className="text-lg font-semibold">Publicaciones del grupo</h2>
+                {posts.length ? (
+                  <span className="text-xs text-muted-foreground">
+                    {posts.length} {posts.length === 1 ? "publicación" : "publicaciones"}
+                  </span>
+                ) : null}
+              </div>
+
+              {canCreatePost ? (
+                <form onSubmit={handleCreatePost} className="space-y-3">
+                  <label htmlFor="group-post" className="sr-only">
+                    Escribe una publicación para el grupo
+                  </label>
+                  <Textarea
+                    id="group-post"
+                    placeholder="Comparte noticias, actividades o preguntas para tu comunidad..."
+                    value={newPostContent}
+                    onChange={(event) => setNewPostContent(event.target.value)}
+                    minLength={1}
+                    maxLength={1000}
+                    disabled={isPosting}
+                    aria-describedby="group-post-helper"
+                  />
+                  <div className="flex items-center justify-between text-xs text-muted-foreground" id="group-post-helper">
+                    <span>Máximo 1000 caracteres.</span>
+                    <span>{newPostContent.trim().length}/1000</span>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button type="submit" size="sm" disabled={isPosting}>
+                      {isPosting ? (
+                        <>
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-                        ) : null}
-                        {isJoining ? "Uniéndote..." : "Aceptar y Unirse"}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                          Publicando...
+                        </>
+                      ) : (
+                        "Publicar"
+                      )}
+                    </Button>
+                  </div>
+                </form>
               ) : (
-                <Button size="lg" disabled>
-                  {display.isAdmin ? "Eres administradora" : "Unión no disponible"}
-                </Button>
+                <p className="text-sm text-muted-foreground">
+                  Debes ser miembro del grupo para crear publicaciones.
+                </p>
               )}
-              <Button variant="outline" size="lg">
+
+              <div className="space-y-3">
+                {posts.length ? (
+                  posts.map((post) => (
+                    <div key={post.id} className="rounded-lg border bg-card p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="font-medium text-foreground">{post.authorName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(post.createdAt).toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-sm leading-relaxed text-muted-foreground mt-3 whitespace-pre-wrap">
+                        {post.content}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Aún no hay publicaciones. Sé la primera en iniciar la conversación.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-4 pt-6 border-t">
+              <div className="flex flex-col sm:flex-row gap-4">
+                {isMember ? (
+                  <>
+                    <Button size="lg" className="sm:w-auto" disabled>
+                      Ya eres miembro
+                    </Button>
+                    {!display?.isAdmin ? (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            size="lg"
+                            variant="outline"
+                            className="sm:w-auto"
+                            disabled={isLeaving}
+                          >
+                            {isLeaving ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                            ) : null}
+                            {isLeaving ? "Saliendo..." : "Abandonar grupo"}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>
+                              ¿Quieres abandonar el grupo?
+                            </AlertDialogTitle>
+                          <AlertDialogDescription>
+                              Dejarás de recibir actualizaciones de &quot;{display?.name}&quot; y necesitarás volver a unirte para participar.
+                          </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                            <AlertDialogAction onClick={handleLeaveGroup} disabled={isLeaving}>
+                              {isLeaving ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                              ) : null}
+                              {isLeaving ? "Saliendo..." : "Confirmar"}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    ) : (
+                      <Button size="lg" variant="outline" className="sm:w-auto" disabled>
+                        Eres administradora
+                      </Button>
+                    )}
+                  </>
+                ) : canJoin ? (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button size="lg" className="sm:w-auto">
+                        Unirse al grupo
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>
+                          ¿Confirmas que quieres unirte al grupo?
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Pasarás a ser miembro de &quot;{display?.name}&quot; y podrías recibir notificaciones.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleJoinGroup} disabled={isJoining}>
+                          {isJoining ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                          ) : null}
+                          {isJoining ? "Uniéndote..." : "Aceptar y unirse"}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                ) : (
+                  <Button size="lg" variant="outline" className="sm:w-auto" disabled>
+                    {display?.isAdmin ? "Eres administradora" : "Unión no disponible"}
+                  </Button>
+                )}
+              </div>
+              <Button variant="outline" size="lg" className="sm:w-auto">
                 Contactar Administrador
               </Button>
             </div>

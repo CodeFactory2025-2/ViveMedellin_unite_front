@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 
 import { AuthProvider } from "@/hooks/useAuth";
+import { NotificationsProvider } from "@/hooks/useNotifications";
 
 interface AppProvidersProps {
   children: ReactNode;
@@ -10,6 +11,8 @@ interface AppProvidersProps {
 
 export function AppProviders({ children }: AppProvidersProps) {
   return (
-    <AuthProvider>{children}</AuthProvider>
+    <NotificationsProvider>
+      <AuthProvider>{children}</AuthProvider>
+    </NotificationsProvider>
   );
 }

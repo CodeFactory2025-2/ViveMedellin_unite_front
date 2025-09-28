@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { NotificationsBell } from "@/components/notifications-bell";
 import { Users, Heart, MapPin, LogOut } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import SkipToContent from "@/components/SkipToContent";
@@ -16,15 +17,18 @@ export default function HomePage() {
       {isAuthenticated ? (
         <header className="border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="container mx-auto px-4 py-4 flex justify-end">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={logout}
-              className="flex items-center gap-2"
-            >
-              <LogOut className="h-4 w-4" aria-hidden="true" />
-              Cerrar Sesión
-            </Button>
+            <div className="flex items-center gap-2">
+              <NotificationsBell />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={logout}
+                className="flex items-center gap-2"
+              >
+                <LogOut className="h-4 w-4" aria-hidden="true" />
+                Cerrar Sesión
+              </Button>
+            </div>
           </div>
         </header>
       ) : null}
@@ -53,6 +57,13 @@ export default function HomePage() {
                 Explorar Grupos
               </Button>
             </Link>
+            {isAuthenticated ? (
+              <Link href="/dashboard/grupos">
+                <Button size="lg" variant="outline" className="text-lg px-8 py-6 h-auto">
+                  Panel de Actividad
+                </Button>
+              </Link>
+            ) : null}
           </div>
         </div>
 

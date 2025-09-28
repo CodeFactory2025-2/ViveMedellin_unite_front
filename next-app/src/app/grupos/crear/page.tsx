@@ -10,6 +10,7 @@ import { Users, ArrowLeft, Plus, Loader2 } from "lucide-react";
 
 import SkipToContent from "@/components/SkipToContent";
 import { RequireAuth } from "@/components/require-auth";
+import { NotificationsBell } from "@/components/notifications-bell";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -254,16 +255,17 @@ export default function CreateGroupPage() {
           <SkipToContent />
         {/* Barra de Navegación */}
         <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <Link href="/" className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-gradient-primary rounded-full flex items-center justify-center">
-              <Users className="h-4 w-4 text-white" />
-            </div>
-            <span className="text-xl font-bold bg-gradient-hero bg-clip-text text-transparent">
-              ViveMedellín
-            </span>
-          </Link>
+          <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+            <Link href="/" className="flex items-center space-x-2">
+              <div className="w-8 h-8 bg-gradient-primary rounded-full flex items-center justify-center">
+                <Users className="h-4 w-4 text-white" />
+              </div>
+              <span className="text-xl font-bold bg-gradient-hero bg-clip-text text-transparent">
+                ViveMedellín
+              </span>
+            </Link>
           <div className="flex items-center space-x-4">
+            <NotificationsBell />
             <Link href="/" className="inline-flex items-center text-muted-foreground hover:text-primary transition-colors">
               <ArrowLeft className="mr-1 h-4 w-4" />
               Inicio

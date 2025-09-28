@@ -15,6 +15,7 @@ import {
 
 import SkipToContent from "@/components/SkipToContent";
 import { RequireAuth } from "@/components/require-auth";
+import { NotificationsBell } from "@/components/notifications-bell";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -221,13 +222,16 @@ export default function ExploreGroupsPage() {
               </Button>
               <h1 className="text-3xl font-bold">Explorar Grupos</h1>
             </div>
-            <Button
-              onClick={() => router.push("/grupos/crear")}
-              className="bg-gradient-primary w-full md:w-auto"
-            >
-              <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
-              Crear Grupo
-            </Button>
+            <div className="flex w-full md:w-auto items-center gap-2 justify-end">
+              <NotificationsBell />
+              <Button
+                onClick={() => router.push("/grupos/crear")}
+                className="bg-gradient-primary w-full md:w-auto"
+              >
+                <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
+                Crear Grupo
+              </Button>
+            </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-3 mb-8">
