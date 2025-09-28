@@ -1,95 +1,76 @@
-# ViveMedellín – Feature 4 (Front-end)
+# ViveMedellín – Front-End (Next.js)
 
-Proyecto académico desarrollado para practicar metodología Scrum. Nuestro squad actuó como equipo Front y se enfocó en la Feature 4: Creación y Gestión de Grupos/Comunidades de la plataforma “ViveMedellín”.
+Migración del front de la Feature 4 (Creación y Gestión de Grupos/Comunidades) a **Next.js 15** con Tailwind 4 y componentes shadcn/ui. Este paquete reemplaza la app Vite original y mantiene la misma lógica de autenticación mock, formularios y flujos de grupos.
 
-### Objetivo General del Proyecto
+## Requisitos
 
-Construir una plataforma inteligente que permita a los usuarios descubrir y participar en actividades en Medellín, favoreciendo la interacción social, la personalización y el acceso a información relevante.
+- Node.js 18.18+ (recomendado 20 LTS)
+- npm (o pnpm/yarn/bun si prefieres). El proyecto usa npm por defecto.
 
-### Alcance Feature 4
+## Scripts principales
 
-Funcionalidades entregadas en este sprint:
+```bash
+npm install         # instala dependencias
+npm run dev         # modo desarrollo (Next + Turbopack)
+npx next build      # build de producción (usa bundler estable)
+npm run build       # build rápido con --turbopack (puede requerir macOS permissions)
+npm run lint        # eslint
+npm start           # servir el build (tras npx next build)
+```
 
-- Crear grupos públicos/privados (formularios con validaciones y persistencia en mock API).
-- Explorar grupos públicos y grupos propios, con filtros y búsqueda.
-- Detalle del grupo con acciones de unión/desunión y feedback.
-- Unirse a grupos públicos (diálogo de confirmación, estados de carga/error, toasts accesibles).
-- Accesibilidad AA: foco controlado, skip links, toast aria-live, inputs etiquetados.
-- Persistencia mock usando localStorage.
+> **Tip:** Si el build con `npm run build` falla por restricciones del SO, ejecuta `npx next build` que usa el bundler estable.
 
-### Historias y tareas comprometidas
+## Rutas clave
 
-1. HU-01 Validar acceso para crear grupo
-Guard, redirección a /login?from=..., toast de acceso restringido, foco en título.
-2. HU-02 Crear un grupo
-Formulario con react-hook-form + zod, checklist de reglas, toast de éxito/error, integración mock createGroup.
-3. HU-03 Unirse a grupo público
-Card con botón “Unirse”, diálogo de confirmación, cambios de estado, integración joinGroup.
+- `/` – landing “ViveMedellín”.
+- `/login` – formulario de inicio de sesión (detecta `?from=` para toasts accesibles).
+- `/register` – registro de usuarias.
+- `/grupos` – exploración de grupos públicos/propios.
+- `/grupos/crear` – formulario protegido para crear grupos.
+- `/grupos/[slug]` – detalle del grupo (join público, estados de miembro/admin).
+- `/test-api` – demo de la API mock (registro/login rápido y vista de usuarios en `localStorage`).
 
-Las evidencias (GIFs/capturas) y la planeación de sprint se documentaron en Jira (ID AB#… según backlog del curso).
+## Mock de autenticación
 
-### Tecnologías
+Los usuarios se guardan en `localStorage` bajo las llaves `vive-medellin-users` y `vive-medellin-auth-token`. Al iniciar la app se cargan usuarios y grupos de ejemplo desde:
 
-- React 18 + Vite
-- TypeScript
-- shadcn/ui + Tailwind CSS (componentes adaptados a la guía de UI)
-- react-hook-form + zod
-- tanstack/react-query para data-fetching mock
-- Context API (useAuth) para autenticación simulada
-- lucide-react para iconografía
+- `src/lib/api.ts` → `initializeMockData()`
+- `src/lib/groups-api.ts` → `initializeMockGroupsData()`
 
-### Scripts
+Puedes limpiar los datos desde DevTools → Application → Local Storage.
 
-npm install        # instalar dependencias
-npm run dev        # modo desarrollo (Vite)
-npm run lint       # eslint con reglas del equipo
-npm run build      # build de producción
-npm run preview    # servir el build localmente
+## Componentes y utilidades
 
-### Estructura relevante
+- `src/hooks/useAuth.tsx` – contexto client component para login, register, logout y redirecciones pendientes.
+- `src/components/require-auth.tsx` – guard (client) que redirige a `/login?from=...` cuando no hay sesión.
+- `src/components/ui/*` – componentes shadcn/ui migrados (button, card, form, toast, etc.).
+- `src/app/globals.css` – paleta y utilidades (`bg-gradient-primary`, `bg-gradient-hero`, etc.).
 
-- src/pages
-  - HomePage, LoginPage, RegisterPage, CreateGroupPage, ExploreGroupsPage, GroupDetailPage, DebugPage, etc.
-- src/components
-  - ProtectedRoute, SkipToContent, componentes UI (button, card, alert-dialog, etc.).
-- src/hooks/useAuth.tsx
-  - Contexto de autenticación mock (login, register, logout, pending redirects).
-- src/lib/api.ts, src/lib/groups-api.ts
-  - Endpoints simulados con persistencia en localStorage.
-  - initializeMockGroupsData() contiene los grupos demo (Amigos del Parque Arví, Voluntarios El Poblado, etc.).Puedes modificar imageUrl (URLs públicas) o mover imágenes estáticas al directorio public/.
+## Accesibilidad y UX
 
-### Mock Data y Reset
+- Skip link reutilizable (`<SkipToContent />`).
+- Toasters con aria-live (`useToast`) y variante `sonner` para notificaciones globales.
+- Foco programático en `/login`, estados de carga (`Loader2`) y mensajes de error con `aria-describedby`.
 
-- Usuarios y grupos se inicializan en initializeMockData() / initializeMockGroupsData().
-- Para regenerar datos: abrir DevTools → Application/Storage → eliminar vive-medellin-* o usar /debug → botón “Borrar todo el almacenamiento”.
+## Datos demo
 
-### Accesibilidad y UX
+Usuarios iniciales (puedes modificarlos en `initializeMockData`):
 
-- Checklist AA del A11Y Project.
-- Skip link (Saltar al contenido), foco programático en /login, toasts con aria-live.
-- Formularios con etiquetas, aria-describedby, estados de carga y error visibles.
-- Botones de navegación (“Volver al inicio”) y estados vacíos en /grupos.
+```
+usuario@example.com / 123456
+admin@example.com   / admin123
+```
 
-### Credenciales Demo
+## Notas de migración
 
-Los usuarios mock se almacenan en localStorage. Durante las pruebas se utilizaron correos como:
+- Las páginas React Router originales se mapearon a rutas App Router (`app/`).
+- El flujo `/test-api` del proyecto Vite se reimplementó en `app/test-api/page.tsx` para facilitar pruebas manuales.
+- Si necesitas mantener documentación de Vite, revisa el README del directorio raíz (`../README.md`).
 
-- usuario@example.com / 123456
-- admin@example.com / 123456
-(Ver initializeMockData para actualizaciones).
+## Próximos pasos sugeridos
 
-### Metodología
+- Integrar autenticación real o persistencia remota cuando esté listo el backend.
+- Migrar cualquier utilitario pendiente del repo original (p. ej., páginas de debug adicionales).
+- Ajustar ESLint/Prettier si el equipo adopta nuevas convenciones.
 
-- Sprint basado en historias y tareas de Jira.
-- Daily, Review y Retrospective documentadas en el repositorio de evidencias del curso.
-- Definición Ready/Done, DoR/DoD alineadas con el Product Owner académico.
-
-### Equipo
-
-- Front-end (Feature 4):
-- Integración en GitHub Classroom
-- Docente:
-
-### Licencia / Uso Académico
-
-Proyecto académico sin fines comerciales. Uso exclusivo para aprendizaje de Scrum y desarrollo Front-end.
+Proyecto académico – uso educativo (Scrum + Front-end).

@@ -62,6 +62,7 @@ export default function GroupDetailPage() {
   const [isPosting, setIsPosting] = useState(false);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [commentLoading, setCommentLoading] = useState<Record<string, boolean>>({});
+  const [commentDeleting, setCommentDeleting] = useState<Record<string, boolean>>({});
   const [postDeleting, setPostDeleting] = useState<Record<string, boolean>>({});
   const [isDeletingGroup, setIsDeletingGroup] = useState(false);
 
@@ -480,6 +481,63 @@ export default function GroupDetailPage() {
     }
   };
 
+  const handleDeleteComment = async (postId: string, commentId: string) => {
+    if (!group || !user?.id) {
+      toast({
+        title: "Acción no disponible",
+        description: "Debes iniciar sesión para gestionar los comentarios.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setCommentDeleting((previous) => ({ ...previous, [commentId]: true }));
+
+    try {
+      const response = await groupsApi.deletePostComment(group.id, postId, commentId, user.id);
+      if (response.success) {
+        setPosts((previous) =>
+          previous.map((post) =>
+            post.id === postId
+              ? { ...post, comments: post.comments.filter((comment) => comment.id !== commentId) }
+              : post,
+          ),
+        );
+        setGroup((prev) =>
+          prev
+            ? {
+                ...prev,
+                posts: prev.posts.map((post) =>
+                  post.id === postId
+                    ? { ...post, comments: post.comments.filter((comment) => comment.id !== commentId) }
+                    : post,
+                ),
+              }
+            : prev,
+        );
+        toast({
+          title: "Comentario eliminado",
+          description: "El comentario se eliminó correctamente.",
+        });
+      } else {
+        toast({
+          title: "No se pudo eliminar el comentario",
+          description: response.error || "Inténtalo nuevamente más tarde.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error al eliminar",
+        description:
+          error instanceof Error ? error.message : "Hubo un error técnico. Inténtalo nuevamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setCommentDeleting((previous) => ({ ...previous, [commentId]: false }));
+    }
+  };
+
   const display = useMemo(() => {
     if (!group) {
       return null;
@@ -738,10 +796,49 @@ export default function GroupDetailPage() {
                           <ul className="space-y-2">
                             {post.comments.map((comment) => (
                               <li key={comment.id} className="rounded-md bg-muted/40 p-3">
-                                <p className="text-sm font-medium text-foreground">{comment.authorName}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {new Date(comment.createdAt).toLocaleString()}
-                                </p>
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <p className="text-sm font-medium text-foreground">{comment.authorName}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {new Date(comment.createdAt).toLocaleString()}
+                                    </p>
+                                  </div>
+                                  {(display.isAdmin || comment.authorId === user?.id) ? (
+                                    <AlertDialog>
+                                      <AlertDialogTrigger asChild>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          aria-label="Eliminar comentario"
+                                          disabled={commentDeleting[comment.id]}
+                                        >
+                                          {commentDeleting[comment.id] ? (
+                                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                                          ) : (
+                                            <Trash2 className="h-4 w-4" aria-hidden="true" />
+                                          )}
+                                        </Button>
+                                      </AlertDialogTrigger>
+                                      <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                          <AlertDialogTitle>¿Eliminar comentario?</AlertDialogTitle>
+                                          <AlertDialogDescription>
+                                            Esta acción eliminará el comentario para todas las personas del grupo.
+                                          </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                          <AlertDialogAction
+                                            onClick={() => handleDeleteComment(post.id, comment.id)}
+                                            disabled={commentDeleting[comment.id]}
+                                          >
+                                            Eliminar
+                                          </AlertDialogAction>
+                                        </AlertDialogFooter>
+                                      </AlertDialogContent>
+                                    </AlertDialog>
+                                  ) : null}
+                                </div>
                                 <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap">
                                   {comment.content}
                                 </p>

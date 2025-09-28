@@ -62,18 +62,30 @@ export const addNotification = (notification: NotificationPayload) => {
 };
 
 export const markNotificationAsRead = (id: string) => {
-  const notifications = readFromStorage().map((notification) =>
-    notification.id === id ? { ...notification, read: true } : notification,
-  );
+  const notifications = readFromStorage();
+  const index = notifications.findIndex((notification) => notification.id === id);
+
+  if (index === -1 || notifications[index].read) {
+    return;
+  }
+
+  notifications[index] = { ...notifications[index], read: true };
   persist(notifications);
 };
 
 export const markAllNotificationsAsRead = () => {
-  const notifications = readFromStorage().map((notification) => ({
+  const notifications = readFromStorage();
+  const hasUnread = notifications.some((notification) => !notification.read);
+
+  if (!hasUnread) {
+    return;
+  }
+
+  const updated = notifications.map((notification) => ({
     ...notification,
     read: true,
   }));
-  persist(notifications);
+  persist(updated);
 };
 
 export const clearNotifications = () => {

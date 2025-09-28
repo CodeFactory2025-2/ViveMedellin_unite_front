@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 
 import {
   addNotification as pushNotification,
@@ -25,37 +25,40 @@ const NotificationsContext = createContext<NotificationsContextValue | undefined
 export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [notifications, setNotifications] = useState<NotificationPayload[]>([]);
 
+  const update = useCallback(() => {
+    setNotifications(getNotifications());
+  }, []);
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
 
-    const update = () => setNotifications(getNotifications());
     update();
 
     window.addEventListener("notifications:updated", update);
     return () => window.removeEventListener("notifications:updated", update);
-  }, []);
+  }, [update]);
 
-  const addNotification = (notification: NotificationPayload) => {
+  const addNotification = useCallback((notification: NotificationPayload) => {
     pushNotification(notification);
     setNotifications(getNotifications());
-  };
+  }, []);
 
-  const markAsRead = (id: string) => {
+  const markAsRead = useCallback((id: string) => {
     markNotificationAsRead(id);
     setNotifications(getNotifications());
-  };
+  }, []);
 
-  const markAllAsRead = () => {
+  const markAllAsRead = useCallback(() => {
     markAllNotificationsAsRead();
     setNotifications(getNotifications());
-  };
+  }, []);
 
-  const clearAll = () => {
+  const clearAll = useCallback(() => {
     clearNotifications();
     setNotifications([]);
-  };
+  }, []);
 
   const value = useMemo(
     () => ({
@@ -66,7 +69,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
       clearAll,
       addNotification,
     }),
-    [notifications],
+    [notifications, markAsRead, markAllAsRead, clearAll, addNotification],
   );
 
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
@@ -79,4 +82,3 @@ export const useNotifications = () => {
   }
   return context;
 };
-

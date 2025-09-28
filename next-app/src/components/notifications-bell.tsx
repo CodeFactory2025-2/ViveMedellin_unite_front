@@ -40,8 +40,12 @@ export function NotificationsBell() {
     if (!open) {
       return;
     }
+    const hasUnread = notifications.some((notification) => !notification.read);
+    if (!hasUnread) {
+      return;
+    }
     markAllAsRead();
-  }, [open, markAllAsRead]);
+  }, [open, notifications, markAllAsRead]);
 
   return (
     <div className="relative">
@@ -127,4 +131,3 @@ export function NotificationsBell() {
     </div>
   );
 }
-

@@ -894,6 +894,68 @@ export const deleteGroupPost = async (
   };
 };
 
+export const deletePostComment = async (
+  groupId: string,
+  postId: string,
+  commentId: string,
+  userId: string,
+): Promise<ApiResponse<GroupPostComment>> => {
+  await delay();
+
+  const groups = getGroups();
+  const groupIndex = groups.findIndex((g) => g.id === groupId);
+
+  if (groupIndex === -1) {
+    return {
+      success: false,
+      error: 'Grupo no encontrado',
+      status: 404,
+    };
+  }
+
+  const group = groups[groupIndex];
+  const postIndex = group.posts.findIndex((post) => post.id === postId);
+
+  if (postIndex === -1) {
+    return {
+      success: false,
+      error: 'Publicación no encontrada',
+      status: 404,
+    };
+  }
+
+  const commentIndex = group.posts[postIndex].comments.findIndex((comment) => comment.id === commentId);
+
+  if (commentIndex === -1) {
+    return {
+      success: false,
+      error: 'Comentario no encontrado',
+      status: 404,
+    };
+  }
+
+  const comment = group.posts[postIndex].comments[commentIndex];
+  const isAuthor = comment.authorId === userId;
+  const isAdmin = group.creatorId === userId || group.members.some((member) => member.userId === userId && member.role === 'admin');
+
+  if (!isAuthor && !isAdmin) {
+    return {
+      success: false,
+      error: 'No tienes permisos para eliminar este comentario.',
+      status: 403,
+    };
+  }
+
+  group.posts[postIndex].comments.splice(commentIndex, 1);
+  groups[groupIndex] = group;
+  saveGroups(groups);
+
+  return {
+    success: true,
+    data: comment,
+  };
+};
+
 /**
  * Marca métricas de actividad de grupos
  */
