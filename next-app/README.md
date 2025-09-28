@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ViveMedellín – Front-End (Next.js)
 
-## Getting Started
+Migración del front de la Feature 4 (Creación y Gestión de Grupos/Comunidades) a **Next.js 15** con Tailwind 4 y componentes shadcn/ui. Este paquete reemplaza la app Vite original y mantiene la misma lógica de autenticación mock, formularios y flujos de grupos.
 
-First, run the development server:
+## Requisitos
+
+- Node.js 18.18+ (recomendado 20 LTS)
+- npm (o pnpm/yarn/bun si prefieres). El proyecto usa npm por defecto.
+
+## Scripts principales
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install         # instala dependencias
+npm run dev         # modo desarrollo (Next + Turbopack)
+npx next build      # build de producción (usa bundler estable)
+npm run build       # build rápido con --turbopack (puede requerir macOS permissions)
+npm run lint        # eslint
+npm start           # servir el build (tras npx next build)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+> **Tip:** Si el build con `npm run build` falla por restricciones del SO, ejecuta `npx next build` que usa el bundler estable.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Rutas clave
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `/` – landing “ViveMedellín”.
+- `/login` – formulario de inicio de sesión (detecta `?from=` para toasts accesibles).
+- `/register` – registro de usuarias.
+- `/grupos` – exploración de grupos públicos/propios.
+- `/grupos/crear` – formulario protegido para crear grupos.
+- `/grupos/[slug]` – detalle del grupo (join público, estados de miembro/admin).
+- `/test-api` – demo de la API mock (registro/login rápido y vista de usuarios en `localStorage`).
 
-## Learn More
+## Mock de autenticación
 
-To learn more about Next.js, take a look at the following resources:
+Los usuarios se guardan en `localStorage` bajo las llaves `vive-medellin-users` y `vive-medellin-auth-token`. Al iniciar la app se cargan usuarios y grupos de ejemplo desde:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `src/lib/api.ts` → `initializeMockData()`
+- `src/lib/groups-api.ts` → `initializeMockGroupsData()`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Puedes limpiar los datos desde DevTools → Application → Local Storage.
 
-## Deploy on Vercel
+## Componentes y utilidades
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `src/hooks/useAuth.tsx` – contexto client component para login, register, logout y redirecciones pendientes.
+- `src/components/require-auth.tsx` – guard (client) que redirige a `/login?from=...` cuando no hay sesión.
+- `src/components/ui/*` – componentes shadcn/ui migrados (button, card, form, toast, etc.).
+- `src/app/globals.css` – paleta y utilidades (`bg-gradient-primary`, `bg-gradient-hero`, etc.).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Accesibilidad y UX
+
+- Skip link reutilizable (`<SkipToContent />`).
+- Toasters con aria-live (`useToast`) y variante `sonner` para notificaciones globales.
+- Foco programático en `/login`, estados de carga (`Loader2`) y mensajes de error con `aria-describedby`.
+
+## Datos demo
+
+Usuarios iniciales (puedes modificarlos en `initializeMockData`):
+
+```
+usuario@example.com / 123456
+admin@example.com   / admin123
+```
+
+## Notas de migración
+
+- Las páginas React Router originales se mapearon a rutas App Router (`app/`).
+- El flujo `/test-api` del proyecto Vite se reimplementó en `app/test-api/page.tsx` para facilitar pruebas manuales.
+- Si necesitas mantener documentación de Vite, revisa el README del directorio raíz (`../README.md`).
+
+## Próximos pasos sugeridos
+
+- Integrar autenticación real o persistencia remota cuando esté listo el backend.
+- Migrar cualquier utilitario pendiente del repo original (p. ej., páginas de debug adicionales).
+- Ajustar ESLint/Prettier si el equipo adopta nuevas convenciones.
+
+Proyecto académico – uso educativo (Scrum + Front-end).
