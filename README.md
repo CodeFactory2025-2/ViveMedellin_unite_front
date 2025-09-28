@@ -65,7 +65,6 @@ admin@example.com   / admin123
 
 - Las páginas React Router originales se mapearon a rutas App Router (`app/`).
 - El flujo `/test-api` del proyecto Vite se reimplementó en `app/test-api/page.tsx` para facilitar pruebas manuales.
-- Si necesitas mantener documentación de Vite, revisa el README del directorio raíz (`../README.md`).
 
 ## Próximos pasos sugeridos
 
