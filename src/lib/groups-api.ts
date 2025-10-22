@@ -13,12 +13,23 @@ export interface GroupPostComment {
   createdAt: number;
 }
 
+export interface GroupPostMedia {
+  id: string;
+  name: string;
+  url: string;
+  mimeType: string;
+  size: number;
+}
+
 export interface GroupPost {
   id: string;
   groupId: string;
   authorId: string;
   authorName: string;
-  content: string;
+  content?: string;
+  link?: string;
+  image?: GroupPostMedia | null;
+  file?: GroupPostMedia | null;
   createdAt: number;
   comments: GroupPostComment[];
 }
@@ -100,9 +111,12 @@ export interface UpdateGroupRequest {
 }
 
 export interface CreateGroupPostRequest {
-  content: string;
+  content?: string;
   authorId: string;
   authorName: string;
+  link?: string | null;
+  image?: GroupPostMedia | null;
+  file?: GroupPostMedia | null;
 }
 
 export interface CreateGroupPostCommentRequest {
@@ -160,9 +174,40 @@ type StoredGroup = Partial<Group> & {
 const normalizeGroup = (group: StoredGroup): Group => {
   const members = Array.isArray(group?.members) ? group.members : [];
   const events = Array.isArray(group?.events) ? group.events : [];
+  const sanitizeMedia = (media: unknown): GroupPostMedia | null => {
+    if (
+      media &&
+      typeof media === "object" &&
+      "id" in media &&
+      typeof (media as { id: unknown }).id === "string" &&
+      "name" in media &&
+      typeof (media as { name: unknown }).name === "string" &&
+      "url" in media &&
+      typeof (media as { url: unknown }).url === "string" &&
+      "mimeType" in media &&
+      typeof (media as { mimeType: unknown }).mimeType === "string" &&
+      "size" in media &&
+      typeof (media as { size: unknown }).size === "number"
+    ) {
+      const typedMedia = media as GroupPostMedia;
+      return {
+        id: typedMedia.id,
+        name: typedMedia.name,
+        url: typedMedia.url,
+        mimeType: typedMedia.mimeType,
+        size: typedMedia.size,
+      };
+    }
+    return null;
+  };
+
   const posts = Array.isArray(group?.posts)
     ? (group.posts as GroupPost[]).map((post) => ({
         ...post,
+        content: typeof post?.content === "string" ? post.content : undefined,
+        link: typeof post?.link === "string" ? post.link : undefined,
+        image: sanitizeMedia(post?.image) ?? null,
+        file: sanitizeMedia(post?.file) ?? null,
         comments: Array.isArray(post?.comments) ? post.comments : [],
       }))
     : [];
@@ -205,6 +250,13 @@ const pushNotification = (
     read: false,
     data,
   });
+};
+
+const normalizeText = (value: string): string => {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 };
 
 const getGroups = (): Group[] => {
@@ -503,8 +555,10 @@ export const deleteGroup = async (groupId: string, userId: string): Promise<ApiR
     };
   }
   
-  // Solo el creador puede eliminar el grupo
-  if (group.creatorId !== userId) {
+  const isCreator = group.creatorId === userId;
+  const isAdmin = group.members.some((member) => member.userId === userId && member.role === 'admin');
+
+  if (!isCreator && !isAdmin) {
     return {
       success: false,
       error: 'No tienes permisos para eliminar este grupo'
@@ -513,6 +567,17 @@ export const deleteGroup = async (groupId: string, userId: string): Promise<ApiR
   
   const updatedGroups = groups.filter(g => g.id !== groupId);
   saveGroups(updatedGroups);
+
+  pushNotification(
+    "group:deleted",
+    `Grupo eliminado: ${group.name}`,
+    `El grupo "${group.name}" ha sido eliminado y ya no estará disponible en la plataforma.`,
+    {
+      groupId,
+      deletedBy: userId,
+      memberCount: group.members.length,
+    },
+  );
   
   return {
     success: true
@@ -677,6 +742,75 @@ export const getGroupPosts = async (groupId: string, userId: string): Promise<Ap
 };
 
 /**
+ * Busca publicaciones dentro de un grupo aplicando coincidencias parciales en texto, autor, archivos y enlaces
+ */
+export const searchGroupPosts = async (
+  groupId: string,
+  query: string,
+  userId: string,
+): Promise<ApiResponse<GroupPost[]>> => {
+  await delay();
+
+  const term = query?.trim() ?? "";
+
+  if (term.length < 3) {
+    return {
+      success: false,
+      error: 'Ingresa al menos 3 caracteres para buscar.',
+      status: 422,
+    };
+  }
+
+  const groups = getGroups();
+  const group = groups.find((g) => g.id === groupId);
+
+  if (!group) {
+    return {
+      success: false,
+      error: 'Grupo no encontrado',
+      status: 404,
+    };
+  }
+
+  const hasAccess =
+    group.isPublic ||
+    group.creatorId === userId ||
+    group.members.some((member) => member.userId === userId);
+
+  if (!hasAccess) {
+    return {
+      success: false,
+      error: 'No tienes permisos para buscar en este grupo.',
+      status: 403,
+    };
+  }
+
+  const normalizedTerm = normalizeText(term);
+
+  const matches = group.posts.filter((post) => {
+    const searchableFields = [
+      post.content ?? "",
+      post.authorName ?? "",
+      post.link ?? "",
+      post.image?.name ?? "",
+      post.file?.name ?? "",
+    ];
+
+    return searchableFields.some((field) => normalizeText(field).includes(normalizedTerm));
+  });
+
+  return {
+    success: true,
+    data: matches
+      .map((post) => ({
+        ...post,
+        comments: [...post.comments].sort((a, b) => a.createdAt - b.createdAt),
+      }))
+      .sort((a, b) => b.createdAt - a.createdAt),
+  };
+};
+
+/**
  * Crea una nueva publicación dentro del grupo
  */
 export const createGroupPost = async (
@@ -698,7 +832,8 @@ export const createGroupPost = async (
   }
 
   const group = groups[groupIndex];
-  const isMember = group.creatorId === userId || group.members.some((member) => member.userId === userId);
+  const isMember =
+    group.creatorId === userId || group.members.some((member) => member.userId === userId);
 
   if (!isMember) {
     return {
@@ -708,11 +843,90 @@ export const createGroupPost = async (
     };
   }
 
-  const content = request.content.trim();
-  if (!content) {
+  const rawContent = request.content?.trim() ?? "";
+  const hasContent = rawContent.length > 0;
+  const hasImage = Boolean(request.image);
+  const hasFile = Boolean(request.file);
+  const hasLink = Boolean(request.link && request.link.trim().length > 0);
+
+  if (!hasContent && !hasImage && !hasFile && !hasLink) {
     return {
       success: false,
       error: 'El contenido de la publicación no puede estar vacío.',
+      status: 422,
+    };
+  }
+
+  if (rawContent.length > 1000) {
+    return {
+      success: false,
+      error: 'El contenido de la publicación excede los 1000 caracteres.',
+      status: 422,
+    };
+  }
+
+  let sanitizedLink: string | undefined;
+  if (hasLink) {
+    try {
+      const parsedUrl = new URL(request.link!.trim());
+      sanitizedLink = parsedUrl.toString();
+    } catch {
+      return {
+        success: false,
+        error: 'El enlace proporcionado no es válido.',
+        status: 422,
+      };
+    }
+  }
+
+  const validateMedia = (
+    media: GroupPostMedia | null | undefined,
+    allowedMimeTypes: string[],
+    maxSizeInBytes: number,
+    errorMessage: string,
+  ): GroupPostMedia | undefined => {
+    if (!media) {
+      return undefined;
+    }
+
+    if (!allowedMimeTypes.includes(media.mimeType)) {
+      throw new Error(errorMessage);
+    }
+
+    if (media.size > maxSizeInBytes) {
+      throw new Error(errorMessage);
+    }
+
+    return media;
+  };
+
+  let image: GroupPostMedia | undefined;
+  let file: GroupPostMedia | undefined;
+
+  try {
+    image = validateMedia(
+      request.image,
+      ["image/jpeg", "image/png", "image/jpg"],
+      5 * 1024 * 1024,
+      'Formato o tamaño de imagen no permitido.',
+    );
+
+    file = validateMedia(
+      request.file,
+      [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ],
+      10 * 1024 * 1024,
+      'Formato o tamaño de archivo no permitido.',
+    );
+  } catch (validationError) {
+    return {
+      success: false,
+      error:
+        validationError instanceof Error
+          ? validationError.message
+          : 'Formato o tamaño no permitido.',
       status: 422,
     };
   }
@@ -722,7 +936,10 @@ export const createGroupPost = async (
     groupId,
     authorId: request.authorId,
     authorName: request.authorName,
-    content,
+    content: hasContent ? rawContent : undefined,
+    link: sanitizedLink,
+    image: image ?? null,
+    file: file ?? null,
     createdAt: Date.now(),
     comments: [],
   };
@@ -731,11 +948,15 @@ export const createGroupPost = async (
   groups[groupIndex] = group;
   saveGroups(groups);
 
-  const preview = content.length > 80 ? `${content.slice(0, 77)}...` : content;
+  const previewSource = rawContent || sanitizedLink || '';
+  const preview =
+    previewSource.length > 80 ? `${previewSource.slice(0, 77)}...` : previewSource;
   pushNotification(
     "group:new-post",
     `Nueva publicación en ${group.name}`,
-    `${request.authorName} compartió: ${preview}`,
+    preview
+      ? `${request.authorName} compartió: ${preview}`
+      : `${request.authorName} ha compartido nuevo contenido en el grupo.`,
     {
       groupId,
       postId: newPost.id,

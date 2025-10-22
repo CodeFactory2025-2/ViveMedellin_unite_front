@@ -195,7 +195,7 @@ function DashboardContent() {
                           </Badge>
                         </div>
                         <p className="mt-3 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
-                          {post.content}
+                          {post.content ?? post.link ?? (post.image ? "Publicación con imagen" : post.file ? "Publicación con archivo adjunto" : "Publicación sin texto")}
                         </p>
                         <Button
                           variant="ghost"

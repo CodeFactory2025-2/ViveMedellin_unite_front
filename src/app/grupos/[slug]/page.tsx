@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
@@ -11,6 +11,12 @@ import {
   User,
   Loader2,
   Trash2,
+  Image as ImageIcon,
+  Link2,
+  Paperclip,
+  Download,
+  X,
+  Search,
 } from "lucide-react";
 
 import SkipToContent from "@/components/SkipToContent";
@@ -36,13 +42,85 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import * as groupsApi from "@/lib/groups-api";
-import type { Group, GroupPost } from "@/lib/groups-api";
+import type { Group, GroupPost, GroupPostMedia } from "@/lib/groups-api";
 
 const DEFAULT_LOCATION = "Medellín, Colombia";
+
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/jpg"] as const;
+const ALLOWED_FILE_TYPES = [
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+] as const;
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+const formatPostDateTime = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  const formattedDate = date.toLocaleDateString("es-CO", {
+    day: "numeric",
+    month: "numeric",
+    year: "numeric",
+  });
+  const formattedTime = date.toLocaleTimeString("es-CO", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return `${formattedDate} ${formattedTime}`;
+};
+
+const formatBytes = (bytes: number): string => {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 KB";
+  }
+
+  const units = ["bytes", "KB", "MB"];
+  let size = bytes;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+
+  if (unitIndex === 0) {
+    return `${Math.round(size)} ${units[unitIndex]}`;
+  }
+
+  return `${size.toFixed(1)} ${units[unitIndex]}`;
+};
+
+const randomId = (): string => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).slice(2);
+};
+
+const readFileAsDataUrl = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(reader.error ?? new Error("No fue posible leer el archivo."));
+    reader.readAsDataURL(file);
+  });
+};
+
+const buildMediaPayload = async (file: File): Promise<GroupPostMedia> => {
+  const url = await readFileAsDataUrl(file);
+  return {
+    id: randomId(),
+    name: file.name,
+    url,
+    mimeType: file.type,
+    size: file.size,
+  };
+};
 
 export default function GroupDetailPage() {
   const params = useParams();
@@ -59,12 +137,48 @@ export default function GroupDetailPage() {
   const [isLeaving, setIsLeaving] = useState(false);
   const [posts, setPosts] = useState<GroupPost[]>([]);
   const [newPostContent, setNewPostContent] = useState("");
+  const [postLink, setPostLink] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [isPosting, setIsPosting] = useState(false);
+  const [isConfirmingPost, setIsConfirmingPost] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [isSearchVisible, setIsSearchVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<GroupPost[] | null>(null);
+  const [isSearchingPosts, setIsSearchingPosts] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [commentLoading, setCommentLoading] = useState<Record<string, boolean>>({});
   const [commentDeleting, setCommentDeleting] = useState<Record<string, boolean>>({});
   const [postDeleting, setPostDeleting] = useState<Record<string, boolean>>({});
   const [isDeletingGroup, setIsDeletingGroup] = useState(false);
+  const [expandedPosts, setExpandedPosts] = useState<Record<string, boolean>>({});
+  const [activeImagePreview, setActiveImagePreview] = useState<{ url: string; name: string } | null>(null);
+
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const trimmedPostText = useMemo(() => newPostContent.trim(), [newPostContent]);
+  const trimmedPostLink = useMemo(() => postLink.trim(), [postLink]);
+  const hasAnyPostContent = useMemo(
+    () =>
+      trimmedPostText.length > 0 ||
+      trimmedPostLink.length > 0 ||
+      Boolean(imageFile) ||
+      Boolean(documentFile),
+    [trimmedPostText, trimmedPostLink, imageFile, documentFile],
+  );
+  const isPublishDisabled = !hasAnyPostContent || isPosting;
+  const emptyPostWarning = hasAnyPostContent ? null : "No puedes publicar contenido vacío.";
+  const characterCount = trimmedPostText.length;
+  const normalizedSearchQuery = useMemo(() => searchQuery.trim(), [searchQuery]);
+  const hasActiveSearch = searchResults !== null;
+  const canSubmitSearch = normalizedSearchQuery.length >= 3;
+  const postsToDisplay = searchResults ?? posts;
+  const canClearSearch = hasActiveSearch || normalizedSearchQuery.length > 0;
 
   useEffect(() => {
     if (!slug || !user?.id) {
@@ -137,7 +251,207 @@ export default function GroupDetailPage() {
       });
       return draft;
     });
+
+    setExpandedPosts((previous) => {
+      const expanded = { ...previous };
+      posts.forEach((post) => {
+        if (!(post.id in expanded)) {
+          expanded[post.id] = false;
+        }
+      });
+      return expanded;
+    });
   }, [posts]);
+
+  useEffect(() => {
+    if (formError && hasAnyPostContent) {
+      setFormError(null);
+    }
+  }, [formError, hasAnyPostContent]);
+
+  useEffect(() => {
+    if (isSearchVisible) {
+      searchInputRef.current?.focus();
+    }
+  }, [isSearchVisible]);
+
+  const handleImageChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      setImageFile(null);
+      setImagePreview(null);
+      return;
+    }
+
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type as typeof ALLOWED_IMAGE_TYPES[number]) || file.size > MAX_IMAGE_SIZE) {
+      setFormError("Formato o tamaño no permitido.");
+      event.target.value = "";
+      setImageFile(null);
+      setImagePreview(null);
+      return;
+    }
+
+    try {
+      const preview = await readFileAsDataUrl(file);
+      setImageFile(file);
+      setImagePreview(preview);
+      setFormError(null);
+    } catch (previewError) {
+      console.error("No fue posible previsualizar la imagen:", previewError);
+      setFormError("Hubo un problema al previsualizar la imagen seleccionada.");
+      event.target.value = "";
+      setImageFile(null);
+      setImagePreview(null);
+    }
+  }, []);
+
+  const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      setDocumentFile(null);
+      return;
+    }
+
+    if (!ALLOWED_FILE_TYPES.includes(file.type as typeof ALLOWED_FILE_TYPES[number]) || file.size > MAX_FILE_SIZE) {
+      setFormError("Formato o tamaño no permitido.");
+      event.target.value = "";
+      setDocumentFile(null);
+      return;
+    }
+
+    setDocumentFile(file);
+    setFormError(null);
+  }, []);
+
+  const clearImage = useCallback(() => {
+    setImageFile(null);
+    setImagePreview(null);
+    if (imageInputRef.current) {
+      imageInputRef.current.value = "";
+    }
+    setFormError(null);
+  }, []);
+
+  const clearDocument = useCallback(() => {
+    setDocumentFile(null);
+    if (documentInputRef.current) {
+      documentInputRef.current.value = "";
+    }
+    setFormError(null);
+  }, []);
+
+  const togglePostExpansion = useCallback((postId: string) => {
+    setExpandedPosts((previous) => ({
+      ...previous,
+      [postId]: !previous[postId],
+    }));
+  }, []);
+
+  const openImagePreview = useCallback((media: GroupPostMedia | null | undefined) => {
+    if (!media) {
+      return;
+    }
+
+    setActiveImagePreview({
+      url: media.url,
+      name: media.name,
+    });
+  }, []);
+
+  const closeImagePreview = useCallback(() => {
+    setActiveImagePreview(null);
+  }, []);
+
+  const handlePostDialogChange = useCallback(
+    (open: boolean) => {
+      if (!open && isPosting) {
+        return;
+      }
+      setIsConfirmingPost(open);
+    },
+    [isPosting],
+  );
+
+  const handleToggleSearchVisibility = useCallback(() => {
+    setIsSearchVisible((previous) => !previous);
+    setSearchError(null);
+  }, []);
+
+  const handleSearchPosts = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+
+      if (!group || !user?.id) {
+        toast({
+          title: "Acción no disponible",
+          description: "Debes iniciar sesión para buscar en el grupo.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (normalizedSearchQuery.length < 3) {
+        setSearchError("Ingresa al menos 3 caracteres para buscar.");
+        return;
+      }
+
+      setSearchError(null);
+      setIsSearchingPosts(true);
+
+      try {
+        const response = await groupsApi.searchGroupPosts(group.id, normalizedSearchQuery, user.id);
+
+        if (response.success && response.data) {
+          setSearchResults(response.data);
+          if (!response.data.length) {
+            toast({
+              title: "No se encontraron publicaciones que coincidan con tu búsqueda.",
+            });
+          } else {
+            toast({
+              title: `Se encontraron ${response.data.length} ${response.data.length === 1 ? "publicación" : "publicaciones"}.`,
+            });
+          }
+        } else {
+          const errorMessage =
+            response.error ||
+            "No fue posible realizar la búsqueda. Por favor, inténtalo nuevamente más tarde.";
+          setSearchResults(null);
+          setSearchError(errorMessage);
+          toast({
+            title: "No fue posible realizar la búsqueda",
+            description: errorMessage,
+            variant: "destructive",
+          });
+        }
+      } catch (searchException) {
+        const fallback =
+          searchException instanceof Error
+            ? searchException.message
+            : "No fue posible realizar la búsqueda. Por favor, inténtalo nuevamente más tarde.";
+        setSearchResults(null);
+        setSearchError(fallback);
+        toast({
+          title: "Error al buscar publicaciones",
+          description: fallback,
+          variant: "destructive",
+        });
+      } finally {
+        setIsSearchingPosts(false);
+      }
+    },
+    [group, user, normalizedSearchQuery],
+  );
+
+  const handleClearSearch = useCallback(() => {
+    setSearchQuery("");
+    setSearchResults(null);
+    setSearchError(null);
+    searchInputRef.current?.focus();
+  }, []);
+
 
   const handleJoinGroup = async () => {
     if (!group || !user?.id) {
@@ -241,7 +555,7 @@ export default function GroupDetailPage() {
     }
   };
 
-  const handleCreatePost = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleCreatePost = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!group || !user?.id) {
@@ -253,25 +567,55 @@ export default function GroupDetailPage() {
       return;
     }
 
-    const content = newPostContent.trim();
-    if (!content) {
+    if (!hasAnyPostContent) {
+      setFormError("No puedes publicar contenido vacío.");
+      return;
+    }
+
+    if (trimmedPostLink.length) {
+      try {
+        const parsedUrl = new URL(trimmedPostLink);
+        if (!parsedUrl.protocol.startsWith("http")) {
+          throw new Error("Protocolo inválido");
+        }
+      } catch {
+        setFormError("El enlace proporcionado no es válido.");
+        return;
+      }
+    }
+
+    setFormError(null);
+    setIsConfirmingPost(true);
+  };
+
+  const handleConfirmCreatePost = useCallback(async () => {
+    if (!group || !user?.id) {
       toast({
-        title: "Publicación vacía",
-        description: "Escribe un mensaje antes de publicar.",
+        title: "Acción no disponible",
+        description: "Debes iniciar sesión para publicar en el grupo.",
         variant: "destructive",
       });
       return;
     }
 
+    const content = trimmedPostText.length ? trimmedPostText : undefined;
+    const link = trimmedPostLink.length ? trimmedPostLink : undefined;
+
     setIsPosting(true);
 
     try {
+      const imagePayload = imageFile ? await buildMediaPayload(imageFile) : null;
+      const filePayload = documentFile ? await buildMediaPayload(documentFile) : null;
+
       const response = await groupsApi.createGroupPost(
         group.id,
         {
           content,
           authorId: user.id,
           authorName: user.name || user.email || "Miembro del grupo",
+          link,
+          image: imagePayload,
+          file: filePayload,
         },
         user.id,
       );
@@ -288,9 +632,13 @@ export default function GroupDetailPage() {
             : prev,
         );
         setNewPostContent("");
+        setPostLink("");
+        clearImage();
+        clearDocument();
+        setIsConfirmingPost(false);
         toast({
-          title: "Publicación creada",
-          description: "Tu mensaje ahora es visible para el grupo.",
+          title: "Tu publicación se ha compartido correctamente",
+          description: "El contenido ya es visible para todas las personas del grupo.",
         });
       } else {
         toast({
@@ -303,13 +651,15 @@ export default function GroupDetailPage() {
       toast({
         title: "Error al publicar",
         description:
-          error instanceof Error ? error.message : "Hubo un error técnico. Inténtalo nuevamente.",
+          error instanceof Error
+            ? error.message
+            : "Hubo un error técnico al crear la publicación. Inténtalo nuevamente más tarde.",
         variant: "destructive",
       });
     } finally {
       setIsPosting(false);
     }
-  };
+  }, [group, user, trimmedPostText, trimmedPostLink, imageFile, documentFile, clearImage, clearDocument]);
 
   const handleCommentSubmit = async (
     event: React.FormEvent<HTMLFormElement>,
@@ -371,6 +721,15 @@ export default function GroupDetailPage() {
               }
             : prev,
         );
+        setSearchResults((previous) =>
+          previous
+            ? previous.map((post) =>
+                post.id === postId
+                  ? { ...post, comments: [...post.comments, newComment] }
+                  : post,
+              )
+            : previous,
+        );
         setCommentDrafts((previous) => ({ ...previous, [postId]: "" }));
         toast({
           title: "Comentario enviado",
@@ -418,6 +777,19 @@ export default function GroupDetailPage() {
                 posts: prev.posts.filter((post) => post.id !== postId),
               }
             : prev,
+        );
+        setCommentDrafts((previous) => {
+          const rest = { ...previous };
+          delete rest[postId];
+          return rest;
+        });
+        setExpandedPosts((previous) => {
+          const rest = { ...previous };
+          delete rest[postId];
+          return rest;
+        });
+        setSearchResults((previous) =>
+          previous ? previous.filter((post) => post.id !== postId) : previous,
         );
         toast({
           title: "Publicación eliminada",
@@ -514,6 +886,15 @@ export default function GroupDetailPage() {
                 ),
               }
             : prev,
+        );
+        setSearchResults((previous) =>
+          previous
+            ? previous.map((post) =>
+                post.id === postId
+                  ? { ...post, comments: post.comments.filter((comment) => comment.id !== commentId) }
+                  : post,
+              )
+            : previous,
         );
         toast({
           title: "Comentario eliminado",
@@ -695,46 +1076,283 @@ export default function GroupDetailPage() {
             </div>
 
             <div className="pt-6 border-t space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <h2 className="text-lg font-semibold">Publicaciones del grupo</h2>
-                {posts.length ? (
-                  <span className="text-xs text-muted-foreground">
-                    {posts.length} {posts.length === 1 ? "publicación" : "publicaciones"}
-                  </span>
-                ) : null}
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <h2 className="text-lg font-semibold">Publicaciones del grupo</h2>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleToggleSearchVisibility}
+                    aria-expanded={isSearchVisible}
+                    aria-controls="group-posts-search"
+                    className="inline-flex items-center gap-2"
+                  >
+                    <Search className="h-4 w-4" aria-hidden="true" />
+                    Publicaciones del grupo
+                  </Button>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {hasActiveSearch ? (
+                    <span>
+                      {postsToDisplay.length} {postsToDisplay.length === 1 ? "resultado" : "resultados"}
+                    </span>
+                  ) : posts.length ? (
+                    <span>
+                      {posts.length} {posts.length === 1 ? "publicación" : "publicaciones"}
+                    </span>
+                  ) : null}
+                </div>
               </div>
 
-              {canCreatePost ? (
-                <form onSubmit={handleCreatePost} className="space-y-3">
-                  <label htmlFor="group-post" className="sr-only">
-                    Escribe una publicación para el grupo
-                  </label>
-                  <Textarea
-                    id="group-post"
-                    placeholder="Comparte noticias, actividades o preguntas para tu comunidad..."
-                    value={newPostContent}
-                    onChange={(event) => setNewPostContent(event.target.value)}
-                    minLength={1}
-                    maxLength={1000}
-                    disabled={isPosting}
-                    aria-describedby="group-post-helper"
+              {isSearchVisible ? (
+                <form
+                  id="group-posts-search"
+                  onSubmit={handleSearchPosts}
+                  className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"
+                >
+                  <Input
+                    ref={searchInputRef}
+                    type="search"
+                    placeholder="Buscar por texto, autor o archivo adjunto"
+                    value={searchQuery}
+                    onChange={(event) => {
+                      setSearchQuery(event.target.value);
+                      if (searchError) {
+                        setSearchError(null);
+                      }
+                    }}
+                    disabled={isSearchingPosts}
+                    aria-label="Buscar publicaciones del grupo"
                   />
-                  <div className="flex items-center justify-between text-xs text-muted-foreground" id="group-post-helper">
-                    <span>Máximo 1000 caracteres.</span>
-                    <span>{newPostContent.trim().length}/1000</span>
+                  <Button type="submit" size="sm" disabled={isSearchingPosts || !canSubmitSearch}>
+                    {isSearchingPosts ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                        Buscando...
+                      </>
+                    ) : (
+                      "Buscar"
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearSearch}
+                    disabled={!canClearSearch || isSearchingPosts}
+                  >
+                    Limpiar filtros
+                  </Button>
+                  {searchError ? (
+                    <p className="text-xs font-medium text-destructive sm:col-span-3">{searchError}</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground sm:col-span-3">
+                      {canSubmitSearch
+                        ? "La búsqueda ignora mayúsculas, minúsculas y acentos."
+                        : "Ingresa al menos 3 caracteres para activar la búsqueda."}
+                    </p>
+                  )}
+                </form>
+              ) : null}
+
+              {canCreatePost ? (
+                <form onSubmit={handleCreatePost} className="space-y-4">
+                  <div className="space-y-2">
+                    <label htmlFor="group-post" className="sr-only">
+                      Escribe una publicación para el grupo
+                    </label>
+                    <Textarea
+                      id="group-post"
+                      placeholder="Comparte noticias, actividades o preguntas para tu comunidad..."
+                      value={newPostContent}
+                      onChange={(event) => setNewPostContent(event.target.value)}
+                      maxLength={1000}
+                      disabled={isPosting}
+                      aria-describedby="group-post-helper"
+                    />
+                    <div
+                      className="flex items-center justify-between text-xs text-muted-foreground"
+                      id="group-post-helper"
+                    >
+                      <span>Máximo 1000 caracteres.</span>
+                      <span>{characterCount}/1000</span>
+                    </div>
                   </div>
-                  <div className="flex justify-end">
-                    <Button type="submit" size="sm" disabled={isPosting}>
-                      {isPosting ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-                          Publicando...
-                        </>
-                      ) : (
-                        "Publicar"
-                      )}
-                    </Button>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <label
+                        htmlFor="group-post-image"
+                        className="inline-flex items-center gap-2 text-sm font-medium text-foreground"
+                      >
+                        <ImageIcon className="h-4 w-4 text-primary" aria-hidden="true" />
+                        Añadir imagen
+                      </label>
+                      <Input
+                        id="group-post-image"
+                        type="file"
+                        accept="image/png,image/jpeg"
+                        onChange={handleImageChange}
+                        disabled={isPosting}
+                        ref={imageInputRef}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Formatos permitidos: JPG, JPEG o PNG. Tamaño máximo 5&nbsp;MB.
+                      </p>
+                      {imagePreview && imageFile ? (
+                        <div className="flex items-center gap-3 rounded-md border bg-muted/40 p-3">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openImagePreview({
+                                id: "preview-image",
+                                name: imageFile.name,
+                                url: imagePreview,
+                                mimeType: imageFile.type,
+                                size: imageFile.size,
+                              })
+                            }
+                            className="inline-flex overflow-hidden rounded-md border"
+                            aria-label="Ampliar imagen seleccionada"
+                          >
+                            <img
+                              src={imagePreview}
+                              alt={imageFile.name}
+                              className="h-20 w-20 object-cover"
+                            />
+                          </button>
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-foreground">{imageFile.name}</p>
+                            <p className="text-xs text-muted-foreground">{formatBytes(imageFile.size)}</p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={clearImage}
+                            aria-label="Quitar imagen adjunta"
+                          >
+                            <Trash2 className="h-4 w-4" aria-hidden="true" />
+                            Quitar
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-2">
+                      <label
+                        htmlFor="group-post-file"
+                        className="inline-flex items-center gap-2 text-sm font-medium text-foreground"
+                      >
+                        <Paperclip className="h-4 w-4 text-primary" aria-hidden="true" />
+                        Adjuntar archivo
+                      </label>
+                      <Input
+                        id="group-post-file"
+                        type="file"
+                        accept=".pdf,.docx"
+                        onChange={handleFileChange}
+                        disabled={isPosting}
+                        ref={documentInputRef}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Se permiten archivos PDF o DOCX con un tamaño máximo de 10&nbsp;MB.
+                      </p>
+                      {documentFile ? (
+                        <div className="flex items-center gap-3 rounded-md border bg-muted/40 p-3">
+                          <Paperclip className="h-4 w-4 text-primary" aria-hidden="true" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-foreground">{documentFile.name}</p>
+                            <p className="text-xs text-muted-foreground">{formatBytes(documentFile.size)}</p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={clearDocument}
+                            aria-label="Quitar archivo adjunto"
+                          >
+                            <Trash2 className="h-4 w-4" aria-hidden="true" />
+                            Quitar
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
+
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="group-post-link"
+                      className="inline-flex items-center gap-2 text-sm font-medium text-foreground"
+                    >
+                      <Link2 className="h-4 w-4 text-primary" aria-hidden="true" />
+                      Añadir enlace externo
+                    </label>
+                    <Input
+                      id="group-post-link"
+                      type="url"
+                      placeholder="https://ejemplo.com/contenido"
+                      value={postLink}
+                      onChange={(event) => setPostLink(event.target.value)}
+                      disabled={isPosting}
+                      aria-describedby="group-post-link-helper"
+                    />
+                    <p id="group-post-link-helper" className="text-[11px] text-muted-foreground">
+                      El enlace se mostrará como hipervínculo dentro de la publicación.
+                    </p>
+                  </div>
+
+                  {formError ? (
+                    <p className="text-sm font-medium text-destructive">{formError}</p>
+                  ) : null}
+
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    {emptyPostWarning ? (
+                      <span className="text-xs font-medium text-destructive">{emptyPostWarning}</span>
+                    ) : null}
+                    <div className="flex justify-end">
+                      <Button type="submit" size="sm" disabled={isPublishDisabled}>
+                        {isPosting ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                            Publicando...
+                          </>
+                        ) : (
+                          "Publicar"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <AlertDialog open={isConfirmingPost} onOpenChange={handlePostDialogChange}>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>¿Desea hacer esta publicación?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          El contenido que compartas será visible para todos los miembros del grupo.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel disabled={isPosting}>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => {
+                            void handleConfirmCreatePost();
+                          }}
+                          disabled={isPosting}
+                        >
+                          {isPosting ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                              Publicando...
+                            </>
+                          ) : (
+                            "Aceptar"
+                          )}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </form>
               ) : (
                 <p className="text-sm text-muted-foreground">
@@ -743,14 +1361,33 @@ export default function GroupDetailPage() {
               )}
 
               <div className="space-y-3">
-                {posts.length ? (
-                  posts.map((post) => (
+                {hasActiveSearch && postsToDisplay.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No se encontraron publicaciones que coincidan con tu búsqueda.
+                  </p>
+                ) : null}
+
+                {!hasActiveSearch && postsToDisplay.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Aún no hay publicaciones. Sé la primera en iniciar la conversación.
+                  </p>
+                ) : null}
+
+                {postsToDisplay.map((post) => {
+                  const textContent = post.content ?? "";
+                  const isLongContent = textContent.length > 300;
+                  const isExpanded = expandedPosts[post.id] ?? false;
+                  const displayContent = isLongContent && !isExpanded
+                    ? `${textContent.slice(0, 300)}…`
+                    : textContent;
+
+                  return (
                     <div key={post.id} className="rounded-lg border bg-card p-4">
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <p className="font-medium text-foreground">{post.authorName}</p>
                           <p className="text-xs text-muted-foreground">
-                            {new Date(post.createdAt).toLocaleString()}
+                            {formatPostDateTime(post.createdAt)}
                           </p>
                         </div>
                         {(display.isAdmin || post.authorId === user?.id) ? (
@@ -786,9 +1423,76 @@ export default function GroupDetailPage() {
                           </AlertDialog>
                         ) : null}
                       </div>
-                      <p className="text-sm leading-relaxed text-muted-foreground mt-3 whitespace-pre-wrap">
-                        {post.content}
-                      </p>
+
+                      <div className="mt-3 space-y-3">
+                        {textContent ? (
+                          <div className="space-y-1 text-sm leading-relaxed text-muted-foreground">
+                            <p className="whitespace-pre-wrap">{displayContent}</p>
+                            {isLongContent ? (
+                              <Button
+                                type="button"
+                                variant="link"
+                                size="sm"
+                                className="h-auto px-0 text-xs"
+                                onClick={() => togglePostExpansion(post.id)}
+                              >
+                                {isExpanded ? "Ver menos" : "Ver más"}
+                              </Button>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {post.link ? (
+                          <a
+                            href={post.link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+                          >
+                            <Link2 className="h-4 w-4" aria-hidden="true" />
+                            {post.link}
+                          </a>
+                        ) : null}
+
+                        {post.image ? (
+                          <div className="space-y-1">
+                            <button
+                              type="button"
+                              onClick={() => openImagePreview(post.image)}
+                              className="inline-flex overflow-hidden rounded-md border"
+                              aria-label="Ampliar imagen de la publicación"
+                            >
+                              <img
+                                src={post.image.url}
+                                alt={post.image.name}
+                                className="max-h-[300px] max-w-[300px] object-cover"
+                              />
+                            </button>
+                            <p className="text-xs text-muted-foreground">{post.image.name}</p>
+                          </div>
+                        ) : null}
+
+                        {post.file ? (
+                          <div className="flex items-center gap-3 rounded-md border bg-muted/40 p-3">
+                            <Paperclip className="h-4 w-4 text-primary" aria-hidden="true" />
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-foreground">{post.file.name}</p>
+                              <p className="text-xs text-muted-foreground">{formatBytes(post.file.size)}</p>
+                            </div>
+                            <Button variant="outline" size="sm" asChild>
+                              <a
+                                href={post.file.url}
+                                download={post.file.name}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                <Download className="h-4 w-4" aria-hidden="true" />
+                                Descargar
+                              </a>
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
 
                       <div className="mt-4 space-y-2 border-t pt-3">
                         <h3 className="text-sm font-semibold">Comentarios</h3>
@@ -891,12 +1595,8 @@ export default function GroupDetailPage() {
                         ) : null}
                       </div>
                     </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Aún no hay publicaciones. Sé la primera en iniciar la conversación.
-                  </p>
-                )}
+                  );
+                })}
               </div>
             </div>
 
@@ -1034,6 +1734,40 @@ export default function GroupDetailPage() {
         <div className="min-h-screen bg-gradient-subtle">
           <SkipToContent />
           {renderHeader()}
+          {activeImagePreview ? (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+              role="dialog"
+              aria-modal="true"
+              onClick={closeImagePreview}
+            >
+              <div
+                className="w-full max-w-3xl space-y-4 rounded-lg bg-background p-4 shadow-lg"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p className="flex-1 truncate text-sm font-medium text-foreground">
+                    {activeImagePreview.name}
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={closeImagePreview}
+                    aria-label="Cerrar vista previa"
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                </div>
+                <div className="max-h-[70vh] overflow-auto rounded-md border bg-muted/40 p-2">
+                  <img
+                    src={activeImagePreview.url}
+                    alt={activeImagePreview.name}
+                    className="mx-auto max-h-[65vh] w-full object-contain"
+                  />
+                </div>
+              </div>
+            </div>
+          ) : null}
           <main id="main-content">{renderContent()}</main>
         </div>
       </RequireAuth>
