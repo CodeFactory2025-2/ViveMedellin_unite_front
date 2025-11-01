@@ -928,7 +928,13 @@ export default function GroupDetailPage() {
       ? new Date(group.createdAt).toLocaleDateString()
       : undefined;
 
-    const isAdmin = Boolean(user?.id && group.creatorId === user.id);
+    const isAdmin = Boolean(
+      user?.id &&
+      (
+        group.creatorId === user.id ||
+        group.members.some((member) => member.userId === user.id && member.role === "admin")
+      )
+    );
 
     return {
       name: group.name ?? "Grupo",
