@@ -1,550 +1,404 @@
-# Backend API Endpoints
+# Backend API Reference – ViveMedellín (HU-01 … HU-09)
 
-Este documento describe los endpoints de la API del backend para la aplicación ViveMedellin.
+> Versión inicial – Sprint 1 y Sprint 2.
+>
+> Esta guía describe los contratos que el front espera del backend para reemplazar los mocks de `src/lib/groups-api.ts` y `src/lib/api.ts`. Todos los ejemplos usan JSON con claves en `camelCase`.
 
-## Autenticación y Usuarios
+## 1. Convenciones generales
 
-### 1. Registrar un nuevo usuario
+| Tema | Detalle |
+|------|---------|
+| Base URL | `https://{host}/api/v1` |
+| Formato | `Content-Type: application/json; charset=utf-8` |
+| Autenticación | JWT en header `Authorization: Bearer <token>` |
+| Fechas | Época Unix en milisegundos (`Date.now()` equivalente) |
+| Identificadores | UUID (o string único) |
+| Errores | JSON `{ "message": "Descripción" }` + código HTTP correspondiente |
 
-- **Endpoint**: `register`
-- **Descripción**: Registra un nuevo usuario en el sistema.
-- **Método HTTP**: `POST`
-- **Ruta**: `/api/auth/register`
-- **Cuerpo de la Petición**:
+**Respuesta de error estándar**
+
+```json
+{
+  "message": "Descripción legible del problema",
+  "code": "opcional-codigo-interno"
+}
+```
+
+## 2. Resumen de endpoints
+
+| HU | Método | Ruta | Descripción |
+|----|--------|------|-------------|
+| 01 | POST | `/auth/register` | Crear cuenta (email + contraseña) |
+| 01 | POST | `/auth/login` | Iniciar sesión y obtener token |
+| 01 | GET | `/auth/session` | Validar sesión antes de crear grupo |
+| 02 | POST | `/groups` | Crear grupo |
+| 03 | POST | `/groups/{groupId}/join` | Unirse a grupo público |
+| 03 | POST | `/groups/{groupId}/requests` | Solicitar acceso a grupo privado |
+| 07 | DELETE | `/groups/{groupId}` | Eliminar grupo |
+| 08 | POST | `/groups/{groupId}/posts` | Crear publicación |
+| 08 | DELETE | `/groups/{groupId}/posts/{postId}` | Eliminar publicación |
+| 08 | POST | `/groups/{groupId}/posts/{postId}/comments` | Crear comentario |
+| 08 | DELETE | `/groups/{groupId}/posts/{postId}/comments/{commentId}` | Eliminar comentario |
+| 09 | GET | `/groups/{groupId}/posts?search={term}` | Buscar publicaciones |
+
+> **Tip:** los nombres y estructuras reflejan lo que consumen los componentes en `src/app/grupos/[slug]/page.tsx` y los helpers en `src/lib/groups-api.ts`.
+
+---
+
+## 3. Sprint 1 – HU-01 / HU-02 / HU-03
+
+### 3.0 POST `/auth/register`
+
+Crea una cuenta nueva. El formulario actual solicita correo, contraseña y confirmación (la confirmación se valida en el front).
+
+- **Headers:** `Content-Type: application/json`
+- **Body:**
   ```json
   {
-    "email": "user@example.com",
-    "password": "password123",
-    "name": "Nombre de Usuario"
+    "email": "usuario@example.com",
+    "password": "123456"
   }
   ```
-- **Respuesta Exitosa (200 OK)**:
+- **201 Created**
   ```json
   {
-    "success": true,
-    "data": {
-      "user": {
-        "id": "string",
-        "email": "string",
-        "name": "string",
-        "verified": false,
-        "createdAt": "number"
-      }
+    "user": {
+      "userId": "user-uuid",
+      "email": "usuario@example.com",
+      "createdAt": 1732149123456
     }
   }
   ```
+- **Errores:**
+  - `400 Bad Request` – correo inválido o contraseña corta.
+  - `409 Conflict` – correo ya registrado.
 
-### 2. Verificar correo electrónico
+**Notas**
+- El front muestra un checkbox de aceptación de términos y valida la confirmación de contraseña antes de enviar.
 
-- **Endpoint**: `verifyEmail`
-- **Descripción**: Verifica el correo electrónico de un usuario utilizando un token de verificación.
-- **Método HTTP**: `POST`
-- **Ruta**: `/api/auth/verify-email`
-- **Cuerpo de la Petición**:
+### 3.1 POST `/auth/login`
+
+Autentica a una usuaria y retorna el token JWT usado por los demás endpoints.
+
+- **Headers:** `Content-Type: application/json`
+- **Body:**
   ```json
   {
-    "email": "user@example.com",
-    "token": "verification_token"
+    "email": "usuario@example.com",
+    "password": "123456"
   }
   ```
-- **Respuesta Exitosa (200 OK)**:
+- **200 OK**
   ```json
   {
-    "success": true
-  }
-  ```
-
-### 3. Iniciar sesión
-
-- **Endpoint**: `login`
-- **Descripción**: Inicia sesión con las credenciales del usuario.
-- **Método HTTP**: `POST`
-- **Ruta**: `/api/auth/login`
-- **Cuerpo de la Petición**:
-  ```json
-  {
-    "email": "user@example.com",
-    "password": "password123"
-  }
-  ```
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      "token": "auth_token",
-      "user": {
-        "id": "string",
-        "email": "string",
-        "name": "string",
-        "verified": true,
-        "createdAt": "number"
-      }
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "user": {
+      "userId": "user-uuid",
+      "email": "usuario@example.com",
+      "roles": ["member"]
     }
   }
   ```
+- **Errores:**
+  - `400 Bad Request` – credenciales faltantes o inválidas.
+  - `401 Unauthorized` – email/password incorrecto.
 
-### 4. Cerrar sesión
+**Notas**
+- El token debe firmarse con el secreto configurado en backend y expiración razonable.
+- El front almacena el token (localStorage) y lo envía como `Authorization: Bearer <token>`.
 
-- **Endpoint**: `logout`
-- **Descripción**: Cierra la sesión del usuario.
-- **Método HTTP**: `POST`
-- **Ruta**: `/api/auth/logout`
-- **Respuesta Exitosa (200 OK)**:
+---
+
+### 3.2 GET `/auth/session`
+
+Valida la sesión para habilitar `/grupos/crear`.
+
+- **Headers:** `Authorization: Bearer <token>` (opcional; si falta, responde 401).
+- **200 OK**
   ```json
   {
-    "success": true
+    "userId": "user-uuid",
+    "email": "usuario@example.com",
+    "roles": ["member", "admin"]
   }
   ```
+- **Errores:** `401 Unauthorized` cuando no hay token o expiró.
 
-### 5. Solicitar restablecimiento de contraseña
+**Feedback Front** – si 401 ⇒ redirección a `/login?from=/grupos/crear` con toast "Debes iniciar sesión para crear un grupo".
 
-- **Endpoint**: `requestPasswordReset`
-- **Descripción**: Inicia el proceso para restablecer la contraseña.
-- **Método HTTP**: `POST`
-- **Ruta**: `/api/auth/request-password-reset`
-- **Cuerpo de la Petición**:
+---
+
+### 3.3 POST `/groups`
+
+Crea un grupo público o privado.
+
+- **Headers:** `Authorization: Bearer <token>`.
+- **Body** (`CreateGroupRequest`)
   ```json
   {
-    "email": "user@example.com"
+    "name": "Club de Lectura Medellín",
+    "description": "Nos reunimos cada miércoles",
+    "category": "Cultura",
+    "theme": "Literatura contemporánea",
+    "participationRules": "Respetar turnos de palabra",
+    "location": {
+      "latitude": 6.2442,
+      "longitude": -75.5812,
+      "address": "Biblioteca Pública Piloto"
+    },
+    "imageUrl": "https://cdn.vivemedellin.com/groups/cover.png",
+    "isPublic": true
   }
   ```
-- **Respuesta Exitosa (200 OK)**:
+- **201 Created**
   ```json
   {
-    "success": true
+    "id": "group-uuid",
+    "slug": "club-de-lectura-medellin",
+    "name": "Club de Lectura Medellín",
+    "description": "Nos reunimos cada miércoles",
+    "category": "Cultura",
+    "theme": "Literatura contemporánea",
+    "participationRules": "Respetar turnos de palabra",
+    "location": {
+      "latitude": 6.2442,
+      "longitude": -75.5812,
+      "address": "Biblioteca Pública Piloto"
+    },
+    "imageUrl": "https://cdn.vivemedellin.com/groups/cover.png",
+    "isPublic": true,
+    "creatorId": "user-uuid",
+    "createdAt": 1732149123456,
+    "members": [
+      { "userId": "user-uuid", "role": "admin", "joinedAt": 1732149123456 }
+    ],
+    "events": [],
+    "posts": []
   }
   ```
+- **Errores:** `400 Bad Request`, `401 Unauthorized`, `409 Conflict` (nombre duplicado).
 
-### 6. Restablecer contraseña
+**Feedback Front** – toast: `El grupo "{name}" se ha creado correctamente` y navegación a `/grupos/{slug}`.
 
-- **Endpoint**: `resetPassword`
-- **Descripción**: Restablece la contraseña utilizando un token.
-- **Método HTTP**: `POST`
-- **Ruta**: `/api/auth/reset-password`
-- **Cuerpo de la Petición**:
+---
+
+### 3.4 POST `/groups/{groupId}/join`
+
+Unirse a un grupo público.
+
+- **Headers:** `Authorization: Bearer <token>`.
+- **200 OK**
   ```json
   {
-    "email": "user@example.com",
-    "token": "reset_token",
-    "newPassword": "new_password"
-  }
-  ```
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true
-  }
-  ```
-
-### 7. Verificar sesión activa
-
-- **Endpoint**: `checkAuth`
-- **Descripción**: Verifica si el usuario tiene una sesión activa.
-- **Método HTTP**: `GET`
-- **Ruta**: `/api/auth/check`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      "user": {
-        "id": "string",
-        "email": "string",
-        "name": "string",
-        "verified": true,
-        "createdAt": "number"
-      }
-    }
-  }
-  ```
-
-### 8. Actualizar perfil de usuario
-
-- **Endpoint**: `updateUserProfile`
-- **Descripción**: Actualiza la información del perfil de un usuario.
-- **Método HTTP**: `PUT`
-- **Ruta**: `/api/users/{userId}`
-- **Cuerpo de la Petición**:
-  ```json
-  {
-    "name": "Nuevo Nombre"
-  }
-  ```
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      "user": {
-        "id": "string",
-        "email": "string",
-        "name": "string",
-        "verified": true,
-        "createdAt": "number"
-      }
-    }
-  }
-  ```
-
-### 9. Cambiar contraseña
-
-- **Endpoint**: `changePassword`
-- **Descripción**: Cambia la contraseña de un usuario autenticado.
-- **Método HTTP**: `PUT`
-- **Ruta**: `/api/users/{userId}/password`
-- **Cuerpo de la Petición**:
-  ```json
-  {
-    "currentPassword": "current_password",
-    "newPassword": "new_password"
-  }
-  ```
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true
-  }
-  ```
-
-## Grupos
-
-### 1. Obtener todos los grupos
-
-- **Endpoint**: `getAllGroups`
-- **Descripción**: Obtiene la lista de todos los grupos a los que el usuario tiene acceso.
-- **Método HTTP**: `GET`
-- **Ruta**: `/api/groups`
-- **Parámetros de Consulta**: `userId`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": [
-      // Array de objetos Group
+    "groupId": "group-uuid",
+    "memberCount": 42,
+    "members": [
+      { "userId": "user-uuid", "role": "member", "joinedAt": 1732149123456 }
     ]
   }
   ```
+- **Errores:** `401 Unauthorized`, `403 Forbidden` (grupo privado), `404 Not Found`, `409 Conflict` (ya es miembro).
 
-### 2. Obtener un grupo por ID
+**Feedback Front** – toast `Te has unido a "{group.name}"`; botón cambia a "Ya eres miembro".
 
-- **Endpoint**: `getGroupById`
-- **Descripción**: Obtiene los detalles de un grupo específico por su ID.
-- **Método HTTP**: `GET`
-- **Ruta**: `/api/groups/{groupId}`
-- **Parámetros de Consulta**: `userId`
-- **Respuesta Exitosa (200 OK)**:
+---
+
+### 3.5 POST `/groups/{groupId}/requests`
+
+Solicitar acceso a un grupo privado.
+
+- **Headers:** `Authorization: Bearer <token>`.
+- **Body opcional:**
   ```json
   {
-    "success": true,
-    "data": {
-      // Objeto Group
+    "message": "Me gustaría participar en las actividades"
+  }
+  ```
+- **201 Created**
+  ```json
+  {
+    "requestId": "req-uuid",
+    "groupId": "group-uuid",
+    "userId": "user-uuid",
+    "status": "PENDING",
+    "requestedAt": 1732149123456
+  }
+  ```
+- **Errores:** `401`, `404` (grupo no existe), `409` (solicitud ya registrada).
+
+**Feedback Front** – toast `Solicitud enviada al administrador del grupo`.
+
+---
+
+## 4. Sprint 2 – HU-07 / HU-08 / HU-09
+
+### 4.1 DELETE `/groups/{groupId}`
+
+Elimina el grupo completo. Disponible para creadora o miembros con `role: "admin"`.
+
+- **Headers:** `Authorization: Bearer <token>`.
+- **204 No Content** – sin cuerpo.
+- **Errores:** `401`, `403`, `404`, `409`.
+
+**Feedback Front** – toast `Grupo eliminado` + redirección a `/grupos`. Debe completarse en <3 s.
+
+---
+
+### 4.2 POST `/groups/{groupId}/posts`
+
+Crea una publicación con texto, link, imagen y/o archivo.
+
+- **Headers:** `Authorization: Bearer <token>`.
+- **Body:** al menos uno de `content`, `link`, `image`, `file`.
+  ```json
+  {
+    "content": "¡Nos reunimos este miércoles!",
+    "link": "https://ejemplo.com/agenda",
+    "image": {
+      "id": "temp-uuid",
+      "name": "banner.png",
+      "mimeType": "image/png",
+      "size": 184532,
+      "url": "https://storage.pre-signed-upload"
+    },
+    "file": {
+      "id": "temp-uuid",
+      "name": "programa.pdf",
+      "mimeType": "application/pdf",
+      "size": 281902,
+      "url": "https://storage.pre-signed-upload"
     }
   }
   ```
-
-### 3. Obtener un grupo por slug
-
-- **Endpoint**: `getGroupBySlug`
-- **Descripción**: Obtiene los detalles de un grupo específico por su slug.
-- **Método HTTP**: `GET`
-- **Ruta**: `/api/groups/slug/{slug}`
-- **Parámetros de Consulta**: `userId`
-- **Respuesta Exitosa (200 OK)**:
+- **201 Created**
   ```json
   {
-    "success": true,
-    "data": {
-      // Objeto Group
-    }
+    "id": "post-uuid",
+    "groupId": "group-uuid",
+    "authorId": "user-uuid",
+    "authorName": "Usuario Demo",
+    "content": "¡Nos reunimos este miércoles!",
+    "link": "https://ejemplo.com/agenda",
+    "image": {
+      "id": "img-uuid",
+      "name": "banner.png",
+      "mimeType": "image/png",
+      "size": 184532,
+      "url": "https://cdn.vivemedellin.com/posts/img-uuid"
+    },
+    "file": {
+      "id": "doc-uuid",
+      "name": "programa.pdf",
+      "mimeType": "application/pdf",
+      "size": 281902,
+      "url": "https://cdn.vivemedellin.com/posts/doc-uuid"
+    },
+    "createdAt": 1732149123456,
+    "comments": []
   }
   ```
+- **Errores comunes:** `400`, `401`, `403`, `404`, `413`.
 
-### 4. Crear un nuevo grupo
+**Feedback Front** – modal "¿Desea hacer esta publicación?" → al aceptar, toast `Tu publicación se ha compartido correctamente` y se agrega en <3 s.
 
-- **Endpoint**: `createGroup`
-- **Descripción**: Crea un nuevo grupo.
-- **Método HTTP**: `POST`
-- **Ruta**: `/api/groups`
-- **Cuerpo de la Petición**: `CreateGroupRequest`, `userId`
-- **Respuesta Exitosa (200 OK)**:
+---
+
+### 4.3 DELETE `/groups/{groupId}/posts/{postId}`
+
+Elimina una publicación (autora o admin).
+
+- **204 No Content**
+- **Errores:** `401`, `403`, `404`
+- **Feedback:** toast `Publicación eliminada`.
+
+---
+
+### 4.4 POST `/groups/{groupId}/posts/{postId}/comments`
+
+Crea un comentario.
+
+- **Headers:** `Authorization: Bearer <token>`.
+- **Body**
   ```json
   {
-    "success": true,
-    "data": {
-      // Objeto Group
-    }
+    "content": "¡Allí estaré!"
   }
   ```
-
-### 5. Actualizar un grupo
-
-- **Endpoint**: `updateGroup`
-- **Descripción**: Actualiza un grupo existente.
-- **Método HTTP**: `PUT`
-- **Ruta**: `/api/groups/{groupId}`
-- **Cuerpo de la Petición**: `UpdateGroupRequest`, `userId`
-- **Respuesta Exitosa (200 OK)**:
+- **201 Created**
   ```json
   {
-    "success": true,
-    "data": {
-      // Objeto Group
-    }
+    "id": "comment-uuid",
+    "postId": "post-uuid",
+    "authorId": "user-uuid",
+    "authorName": "Usuario Demo",
+    "content": "¡Allí estaré!",
+    "createdAt": 1732149187654
   }
   ```
+- **Errores:** `400/422`, `401`, `403`, `404`
+- **Feedback:** toast `Comentario enviado`.
 
-### 6. Eliminar un grupo
+---
 
-- **Endpoint**: `deleteGroup`
-- **Descripción**: Elimina un grupo.
-- **Método HTTP**: `DELETE`
-- **Ruta**: `/api/groups/{groupId}`
-- **Cuerpo de la Petición**: `userId`
-- **Respuesta Exitosa (200 OK)**:
+### 4.5 DELETE `/groups/{groupId}/posts/{postId}/comments/{commentId}`
+
+Elimina un comentario (autora o admin).
+
+- **204 No Content**
+- **Errores:** `401`, `403`, `404`
+- **Feedback:** toast `Comentario eliminado`.
+
+---
+
+### 4.6 GET `/groups/{groupId}/posts?search={term}`
+
+Busca publicaciones por términos clave (contenido, autor, nombre de adjuntos). Ignora mayúsculas, minúsculas y acentos.
+
+- **Headers:** `Authorization: Bearer <token>`.
+- **Query params:** `search` (>=3 chars), opcional `limit` y `cursor`.
+- **200 OK**
   ```json
   {
-    "success": true
+    "items": [
+      {
+        "id": "post-uuid",
+        "groupId": "group-uuid",
+        "authorId": "user-uuid",
+        "authorName": "Usuario Demo",
+        "content": "Festival de cine independiente",
+        "link": null,
+        "image": null,
+        "file": null,
+        "createdAt": 1732149123456,
+        "comments": []
+      }
+    ],
+    "total": 1,
+    "tookMs": 95
   }
   ```
+- **Errores:** `400/422`, `401`, `403`, `404`, `500`.
 
-### 7. Unirse a un grupo
+**Feedback Front** – si hay resultados, mensaje `Se encontraron X publicaciones`; si `items` vacío, mensaje `No se encontraron publicaciones que coincidan con tu búsqueda.` + botón “Limpiar filtros”.
 
-- **Endpoint**: `joinGroup`
-- **Descripción**: Permite a un usuario unirse a un grupo.
-- **Método HTTP**: `POST`
-- **Ruta**: `/api/groups/{groupId}/join`
-- **Cuerpo de la Petición**: `userId`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      // Objeto Group
-    }
-  }
-  ```
+> **Performance:** debe responder ≤5 s con hasta 1000 publicaciones.
 
-### 8. Abandonar un grupo
+---
 
-- **Endpoint**: `leaveGroup`
-- **Descripción**: Permite a un usuario abandonar un grupo.
-- **Método HTTP**: `POST`
-- **Ruta**: `/api/groups/{groupId}/leave`
-- **Cuerpo de la Petición**: `userId`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      // Objeto Group
-    }
-  }
-  ```
+## 5. Endpoints auxiliares sugeridos
 
-### 9. Obtener publicaciones de un grupo
+No forman parte estricta de las HU, pero facilitan la integración:
 
-- **Endpoint**: `getGroupPosts`
-- **Descripción**: Obtiene todas las publicaciones de un grupo.
-- **Método HTTP**: `GET`
-- **Ruta**: `/api/groups/{groupId}/posts`
-- **Parámetros de Consulta**: `userId`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": [
-      // Array de objetos GroupPost
-    ]
-  }
-  ```
+- **POST** `/uploads/sign` – devuelve URL prefirmada para subir `image`/`file` antes de llamar a `/posts`.
+- **GET/POST** `/notifications` – gestionar bandeja de notificaciones (`useNotifications`).
+- **GET** `/groups` y **GET** `/groups/{slug}` – listados y detalle (requeridos por otras pantallas).
 
-### 10. Buscar en las publicaciones de un grupo
+---
 
-- **Endpoint**: `searchGroupPosts`
-- **Descripción**: Busca en las publicaciones de un grupo.
-- **Método HTTP**: `GET`
-- **Ruta**: `/api/groups/{groupId}/posts/search`
-- **Parámetros de Consulta**: `query`, `userId`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": [
-      // Array de objetos GroupPost
-    ]
-  }
-  ```
+## 6. Referencias
 
-### 11. Crear una publicación en un grupo
+- Front-end: `src/lib/groups-api.ts`, `src/lib/api.ts`, `src/app/grupos/[slug]/page.tsx`.
+- Mock de notificaciones: `src/lib/notifications-api.ts`.
+- Definición de roles/permisos: `GroupMember.role` (admin, moderator, member).
 
-- **Endpoint**: `createGroupPost`
-- **Descripción**: Crea una nueva publicación en un grupo.
-- **Método HTTP**: `POST`
-- **Ruta**: `/api/groups/{groupId}/posts`
-- **Cuerpo de la Petición**: `CreateGroupPostRequest`, `userId`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      // Objeto GroupPost
-    }
-  }
-  ```
-
-### 12. Añadir un comentario a una publicación
-
-- **Endpoint**: `addCommentToPost`
-- **Descripción**: Añade un comentario a una publicación.
-- **Método HTTP**: `POST`
-- **Ruta**: `/api/groups/{groupId}/posts/{postId}/comments`
-- **Cuerpo de la Petición**: `CreateGroupPostCommentRequest`, `userId`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      // Objeto GroupPostComment
-    }
-  }
-  ```
-
-### 13. Eliminar una publicación de un grupo
-
-- **Endpoint**: `deleteGroupPost`
-- **Descripción**: Elimina una publicación de un grupo.
-- **Método HTTP**: `DELETE`
-- **Ruta**: `/api/groups/{groupId}/posts/{postId}`
-- **Cuerpo de la Petición**: `userId`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      // Objeto GroupPost
-    }
-  }
-  ```
-
-### 14. Eliminar un comentario de una publicación
-
-- **Endpoint**: `deletePostComment`
-- **Descripción**: Elimina un comentario de una publicación.
-- **Método HTTP**: `DELETE`
-- **Ruta**: `/api/groups/{groupId}/posts/{postId}/comments/{commentId}`
-- **Cuerpo de la Petición**: `userId`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      // Objeto GroupPostComment
-    }
-  }
-  ```
-
-### 15. Obtener resumen de actividad de grupos
-
-- **Endpoint**: `getGroupActivitySummary`
-- **Descripción**: Obtiene un resumen de la actividad de los grupos.
-- **Método HTTP**: `GET`
-- **Ruta**: `/api/groups/activity-summary`
-- **Parámetros de Consulta**: `userId` (opcional)
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      // Objeto GroupActivitySummary
-    }
-  }
-  ```
-
-### 16. Cambiar el rol de un usuario en un grupo
-
-- **Endpoint**: `changeUserRole`
-- **Descripción**: Cambia el rol de un miembro en un grupo.
-- **Método HTTP**: `PUT`
-- **Ruta**: `/api/groups/{groupId}/members/{targetUserId}/role`
-- **Cuerpo de la Petición**: `newRole`, `currentUserId`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      // Objeto Group
-    }
-  }
-  ```
-
-### 17. Crear un evento en un grupo
-
-- **Endpoint**: `createEvent`
-- **Descripción**: Crea un nuevo evento en un grupo.
-- **Método HTTP**: `POST`
-- **Ruta**: `/api/groups/{groupId}/events`
-- **Cuerpo de la Petición**: `eventData`, `userId`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      // Objeto Event
-    }
-  }
-  ```
-
-## Notificaciones
-
-### 1. Obtener notificaciones
-
-- **Endpoint**: `getNotifications`
-- **Descripción**: Obtiene las notificaciones del usuario.
-- **Método HTTP**: `GET`
-- **Ruta**: `/api/notifications`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  [
-    // Array de objetos NotificationPayload
-  ]
-  ```
-
-### 2. Marcar notificación como leída
-
-- **Endpoint**: `markNotificationAsRead`
-- **Descripción**: Marca una notificación como leída.
-- **Método HTTP**: `PUT`
-- **Ruta**: `/api/notifications/{notificationId}/read`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true
-  }
-  ```
-
-### 3. Marcar todas las notificaciones como leídas
-
-- **Endpoint**: `markAllNotificationsAsRead`
-- **Descripción**: Marca todas las notificaciones como leídas.
-- **Método HTTP**: `PUT`
-- **Ruta**: `/api/notifications/read-all`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true
-  }
-  ```
-
-### 4. Limpiar notificaciones
-
-- **Endpoint**: `clearNotifications`
-- **Descripción**: Elimina todas las notificaciones del usuario.
-- **Método HTTP**: `DELETE`
-- **Ruta**: `/api/notifications`
-- **Respuesta Exitosa (200 OK)**:
-  ```json
-  {
-    "success": true
-  }
-  ```
+> **Coordinación:** cualquier cambio en los contratos debe comunicarse al equipo de Front para ajustar mocks y pruebas.
