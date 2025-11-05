@@ -232,7 +232,7 @@ const normalizeGroup = (group: StoredGroup): Group => {
 };
 
 const pushNotification = (
-  type: NotificationType,
+  type: NotificationType | string,
   title: string,
   message: string,
   data?: Record<string, unknown>,
@@ -243,7 +243,7 @@ const pushNotification = (
 
   addNotification({
     id: generateId(),
-    type,
+    type: type as NotificationType,
     title,
     message,
     createdAt: Date.now(),
