@@ -16,7 +16,9 @@ import {
   Paperclip,
   Download,
   X,
+  Check,
   Search,
+  Inbox,
 } from "lucide-react";
 
 import SkipToContent from "@/components/SkipToContent";
@@ -42,12 +44,15 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
+import { useRequestStatus } from "@/hooks/use-request-status";
 import * as groupsApi from "@/lib/groups-api";
-import type { Group, GroupPost, GroupPostMedia } from "@/lib/groups-api";
+import type { Group, GroupPost, GroupPostMedia, GroupJoinRequest } from "@/lib/groups-api";
 
 const DEFAULT_LOCATION = "Medellín, Colombia";
 
@@ -122,6 +127,10 @@ const buildMediaPayload = async (file: File): Promise<GroupPostMedia> => {
   };
 };
 
+const joinRequestUserLabel = (request: GroupJoinRequest): string => {
+  return request.userName || request.userEmail || request.userId || "Usuario";
+};
+
 export default function GroupDetailPage() {
   const params = useParams();
   const slugParam = params?.slug;
@@ -149,6 +158,16 @@ export default function GroupDetailPage() {
   const [searchResults, setSearchResults] = useState<GroupPost[] | null>(null);
   const [isSearchingPosts, setIsSearchingPosts] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [isEditingGroupInfo, setIsEditingGroupInfo] = useState(false);
+  const [isSavingGroupInfo, setIsSavingGroupInfo] = useState(false);
+  const [editedIsPublic, setEditedIsPublic] = useState(true);
+  const [editedDescription, setEditedDescription] = useState("");
+  const [editedAbout, setEditedAbout] = useState("");
+  const [pendingRequests, setPendingRequests] = useState<GroupJoinRequest[]>([]);
+  const [isLoadingRequests, setIsLoadingRequests] = useState(false);
+  const [processingRequest, setProcessingRequest] = useState<Record<string, "accept" | "reject" | null>>({});
+  const [requestDialogOpen, setRequestDialogOpen] = useState(false);
+  const [removingMember, setRemovingMember] = useState<Record<string, boolean>>({});
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [commentLoading, setCommentLoading] = useState<Record<string, boolean>>({});
   const [commentDeleting, setCommentDeleting] = useState<Record<string, boolean>>({});
@@ -156,6 +175,13 @@ export default function GroupDetailPage() {
   const [isDeletingGroup, setIsDeletingGroup] = useState(false);
   const [expandedPosts, setExpandedPosts] = useState<Record<string, boolean>>({});
   const [activeImagePreview, setActiveImagePreview] = useState<{ url: string; name: string } | null>(null);
+  const [userJoinRequest, setUserJoinRequest] = useState<GroupJoinRequest | null>(null);
+  const [isRequestingAccess, setIsRequestingAccess] = useState(false);
+
+  const { rejectedGroups, markRejected, clearRejected } = useRequestStatus(
+    userJoinRequest ? [userJoinRequest] : [],
+    user?.id,
+  );
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
@@ -240,6 +266,85 @@ export default function GroupDetailPage() {
       setIsMember(group.members.some((member) => member.userId === user.id));
     }
   }, [group, user?.id]);
+
+  const isCurrentUserAdmin = useMemo(() => {
+    if (!group || !user?.id) {
+      return false;
+    }
+    return (
+      group.creatorId === user.id ||
+      group.members.some((member) => member.userId === user.id && member.role === "admin")
+    );
+  }, [group, user?.id]);
+
+  useEffect(() => {
+    if (group) {
+      setEditedIsPublic(group.isPublic);
+      setEditedDescription(group.description ?? "");
+      setEditedAbout(group.participationRules ?? "");
+    }
+  }, [group]);
+
+  useEffect(() => {
+    if (!group?.id || !user?.id) {
+      setUserJoinRequest(null);
+      return;
+    }
+
+    let isActive = true;
+
+    const fetchJoinRequests = async () => {
+      try {
+        const response = await groupsApi.getUserJoinRequests(user.id);
+        if (!isActive) {
+          return;
+        }
+
+        if (response.success && response.data) {
+          const currentRequest = response.data.find((request) => request.groupId === group.id) ?? null;
+          setUserJoinRequest(currentRequest);
+        }
+      } catch (requestError) {
+        console.error("Error al cargar las solicitudes del grupo:", requestError);
+      }
+    };
+
+    void fetchJoinRequests();
+
+    if (typeof window !== "undefined") {
+      const handleUpdate = (event: Event) => {
+        const custom = event as CustomEvent;
+        const detail = (custom.detail ?? {}) as { action?: string; groupId?: string; userId?: string };
+        if (detail?.action === "accepted" && detail.groupId === group?.id && detail.userId === user.id) {
+          setIsMember(true);
+          setGroup((previous) =>
+            previous
+              ? {
+                  ...previous,
+                  members: previous.members.some((member) => member.userId === user.id)
+                    ? previous.members
+                    : [...previous.members, { userId: user.id, role: "member", joinedAt: Date.now() }],
+                }
+              : previous,
+          );
+          clearRejected(detail.groupId);
+        }
+        if (detail?.action === "rejected" && detail.groupId === group?.id && detail.userId === user.id) {
+          markRejected(detail.groupId);
+        }
+        void fetchJoinRequests();
+      };
+      window.addEventListener("group-requests:updated", handleUpdate as EventListener);
+      return () => {
+        isActive = false;
+        window.removeEventListener("group-requests:updated", handleUpdate as EventListener);
+      };
+    }
+
+    return () => {
+      isActive = false;
+    };
+  }, [group?.id, user?.id]);
 
   useEffect(() => {
     setCommentDrafts((previous) => {
@@ -453,6 +558,277 @@ export default function GroupDetailPage() {
   }, []);
 
 
+  const handleStartEditGroupInfo = () => {
+    if (!group) {
+      return;
+    }
+    setEditedIsPublic(group.isPublic);
+    setEditedDescription(group.description ?? "");
+    setEditedAbout(group.participationRules ?? "");
+    setIsEditingGroupInfo(true);
+  };
+
+  const handleCancelEditGroupInfo = () => {
+    if (!group) {
+      return;
+    }
+    setEditedIsPublic(group.isPublic);
+    setEditedDescription(group.description ?? "");
+    setEditedAbout(group.participationRules ?? "");
+    setIsEditingGroupInfo(false);
+  };
+
+  const handleSaveGroupInfo = async () => {
+    if (!group || !user?.id) {
+      toast({
+        title: "Acción no disponible",
+        description: "Debes iniciar sesión para actualizar el grupo.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSavingGroupInfo(true);
+    const trimmedDescription = editedDescription.trim();
+    const trimmedAbout = editedAbout.trim();
+
+    try {
+      const response = await groupsApi.updateGroup(
+        group.id,
+        {
+          isPublic: editedIsPublic,
+          description: trimmedDescription,
+          participationRules: trimmedAbout,
+        },
+        user.id,
+      );
+
+      if (response.success && response.data) {
+        const hydratedGroup: Group = {
+          ...response.data,
+          members: [...response.data.members],
+          events: [...response.data.events],
+          posts: [...response.data.posts],
+        };
+
+        setGroup(hydratedGroup);
+        setIsEditingGroupInfo(false);
+        toast({
+          title: "Cambios guardados",
+          description: `Actualizaste la privacidad y la sección "Acerca del grupo".`,
+        });
+      } else {
+        toast({
+          title: "No fue posible guardar los cambios",
+          description: response.error || "Inténtalo nuevamente más tarde.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "No fue posible guardar los cambios",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Hubo un error técnico al actualizar el grupo. Por favor, inténtalo nuevamente.",
+        variant: "destructive",
+      });
+  } finally {
+    setIsSavingGroupInfo(false);
+  }
+};
+
+  const loadPendingRequests = useCallback(
+    async (showSpinner: boolean = false) => {
+      if (!group?.id || !user?.id) {
+        setPendingRequests([]);
+        return;
+      }
+
+      if (showSpinner) {
+        setIsLoadingRequests(true);
+      }
+
+      try {
+        const response = await groupsApi.getJoinRequestsForAdmin(user.id);
+        if (response.success && response.data) {
+          const filtered = response.data.requests.filter(
+            (request) => request.groupId === group.id && request.status === "pending",
+          );
+          setPendingRequests(filtered);
+        } else if (response.error) {
+          toast({
+            title: "No fue posible cargar las solicitudes",
+            description: response.error,
+            variant: "destructive",
+          });
+        }
+      } catch (error) {
+        toast({
+          title: "No fue posible cargar las solicitudes",
+          description:
+            error instanceof Error
+              ? error.message
+              : "Hubo un error técnico al cargar las solicitudes del grupo.",
+          variant: "destructive",
+        });
+      } finally {
+        if (showSpinner) {
+          setIsLoadingRequests(false);
+        }
+      }
+    },
+    [group?.id, toast, user?.id],
+  );
+
+  useEffect(() => {
+    if (!group?.id || !user?.id) {
+      setPendingRequests([]);
+      return;
+    }
+
+    if (isCurrentUserAdmin) {
+      void loadPendingRequests(true);
+    }
+
+    if (typeof window !== "undefined") {
+      const handleUpdate = () => {
+        void loadPendingRequests();
+      };
+      window.addEventListener("group-requests:updated", handleUpdate);
+      return () => {
+        window.removeEventListener("group-requests:updated", handleUpdate);
+      };
+    }
+
+    return () => {};
+  }, [group?.id, isCurrentUserAdmin, loadPendingRequests, user?.id]);
+
+  const handleAcceptRequest = async (request: GroupJoinRequest) => {
+    if (!group || !user?.id) {
+      toast({
+        title: "Acción no disponible",
+        description: "Debes iniciar sesión para gestionar solicitudes.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setProcessingRequest((previous) => ({ ...previous, [request.id]: "accept" }));
+    try {
+      const response = await groupsApi.acceptJoinRequest(request.id, user.id);
+      if (response.success && response.data) {
+        setPendingRequests((previous) => previous.filter((item) => item.id !== request.id));
+        setGroup(response.data.group);
+        toast({
+          title: "Solicitud aceptada",
+          description: `${request.userName ?? request.userEmail ?? "La persona solicitante"} ahora es miembro.`,
+        });
+      } else {
+        toast({
+          title: "No fue posible aceptar la solicitud",
+          description:
+            response.error ||
+            "Hubo un error técnico al procesar tu solicitud. Por favor, inténtalo nuevamente más tarde.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "No fue posible aceptar la solicitud",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Hubo un error técnico al procesar tu solicitud. Por favor, inténtalo nuevamente más tarde.",
+        variant: "destructive",
+      });
+    } finally {
+      setProcessingRequest((previous) => ({ ...previous, [request.id]: null }));
+    }
+  };
+
+  const handleRejectRequest = async (request: GroupJoinRequest) => {
+    if (!group || !user?.id) {
+      toast({
+        title: "Acción no disponible",
+        description: "Debes iniciar sesión para gestionar solicitudes.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setProcessingRequest((previous) => ({ ...previous, [request.id]: "reject" }));
+    try {
+      const response = await groupsApi.rejectJoinRequest(request.id, user.id);
+      if (response.success) {
+        setPendingRequests((previous) => previous.filter((item) => item.id !== request.id));
+        toast({
+          title: "Solicitud rechazada",
+          description: `${request.userName ?? request.userEmail ?? "La persona solicitante"} fue notificada.`,
+        });
+      } else {
+        toast({
+          title: "No fue posible rechazar la solicitud",
+          description:
+            response.error ||
+            "Hubo un error técnico al procesar tu solicitud. Por favor, inténtalo nuevamente más tarde.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "No fue posible rechazar la solicitud",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Hubo un error técnico al procesar tu solicitud. Por favor, inténtalo nuevamente más tarde.",
+        variant: "destructive",
+      });
+    } finally {
+      setProcessingRequest((previous) => ({ ...previous, [request.id]: null }));
+    }
+  };
+
+  const handleRemoveMember = async (memberId: string) => {
+    if (!group || !user?.id) {
+      toast({
+        title: "Acción no disponible",
+        description: "Debes iniciar sesión para gestionar miembros.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setRemovingMember((prev) => ({ ...prev, [memberId]: true }));
+
+    try {
+      const response = await groupsApi.removeGroupMember(group.id, memberId, user.id);
+      if (response.success && response.data) {
+        setGroup(response.data);
+        setIsMember(response.data.members.some((member) => member.userId === user.id));
+        toast({
+          title: "Miembro eliminado",
+          description: "El usuario fue removido del grupo.",
+        });
+      } else {
+        toast({
+          title: "No fue posible eliminar al miembro",
+          description: response.error || "Inténtalo nuevamente más tarde.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "No fue posible eliminar al miembro",
+        description:
+          error instanceof Error ? error.message : "Hubo un error técnico. Inténtalo nuevamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setRemovingMember((prev) => ({ ...prev, [memberId]: false }));
+    }
+  };
+
   const handleJoinGroup = async () => {
     if (!group || !user?.id) {
       toast({
@@ -500,6 +876,138 @@ export default function GroupDetailPage() {
       });
     } finally {
       setIsJoining(false);
+    }
+  };
+
+  const handleRequestDialogChange = (open: boolean) => {
+    if (!open && isRequestingAccess) {
+      return;
+    }
+    setRequestDialogOpen(open);
+  };
+
+  const handleOpenRequestDialog = () => {
+    if (!group || !user?.id) {
+      toast({
+        title: "No fue posible enviar la solicitud",
+        description: "Debes iniciar sesión nuevamente para completar esta acción.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (rejectedGroups[group.id]) {
+      toast({
+        title: "Solicitud rechazada",
+        description: "Tu solicitud fue rechazada. Puedes intentarlo de nuevo en unos momentos.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (groupsApi.checkPendingJoinRequest(user.id, group.id)) {
+      toast({
+        title: "Solicitud pendiente",
+        description: "Ya tienes una solicitud pendiente para este grupo.",
+        variant: "destructive",
+      });
+      setUserJoinRequest((previous) => previous ?? {
+        id: `pending-${Date.now()}`,
+        groupId: group.id,
+        groupSlug: group.slug,
+        groupName: group.name,
+        userId: user.id,
+        userName: user.name,
+        userEmail: user.email,
+        status: "pending",
+        createdAt: Date.now(),
+      });
+      return;
+    }
+
+    setRequestDialogOpen(true);
+  };
+
+  const handleRequestAccess = async () => {
+    if (!group || !user?.id) {
+      toast({
+        title: "No fue posible enviar la solicitud",
+        description: "Debes iniciar sesión nuevamente para completar esta acción.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (userJoinRequest?.status === "pending") {
+      toast({
+        title: "Solicitud pendiente",
+        description: "Ya tienes una solicitud pendiente para este grupo.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (rejectedGroups[group.id]) {
+      toast({
+        title: "Solicitud rechazada",
+        description: "Tu solicitud fue rechazada. Puedes intentarlo de nuevo en unos momentos.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const previousRequest = userJoinRequest;
+    const optimisticRequest: GroupJoinRequest = {
+      id: `pending-${Date.now()}`,
+      groupId: group.id,
+      groupSlug: group.slug,
+      groupName: group.name,
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      status: "pending",
+      createdAt: Date.now(),
+    };
+
+    setUserJoinRequest(optimisticRequest);
+    setIsRequestingAccess(true);
+
+    try {
+      const response = await groupsApi.requestJoinGroup(group.id, user.id, {
+        userName: user.name,
+        userEmail: user.email,
+      });
+
+      if (response.success && response.data) {
+        setUserJoinRequest(response.data);
+        setRequestDialogOpen(false);
+        toast({
+          title: "Tu solicitud ha sido enviada exitosamente",
+          description: `Notificamos al equipo administrador de "${group.name}".`,
+        });
+      } else {
+        setUserJoinRequest(previousRequest ?? null);
+        toast({
+          title: "No fue posible enviar la solicitud",
+          description:
+            response.error ||
+            "Hubo un error técnico al procesar tu solicitud. No fue posible enviarla. Por favor, inténtalo nuevamente más tarde.",
+          variant: "destructive",
+        });
+      }
+    } catch (requestError) {
+      setUserJoinRequest(previousRequest ?? null);
+      setRequestDialogOpen(false);
+      toast({
+        title: "No fue posible enviar la solicitud",
+        description:
+          requestError instanceof Error
+            ? requestError.message
+            : "Hubo un error técnico al procesar tu solicitud. No fue posible enviarla. Por favor, inténtalo nuevamente más tarde.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRequestingAccess(false);
     }
   };
 
@@ -928,14 +1436,6 @@ export default function GroupDetailPage() {
       ? new Date(group.createdAt).toLocaleDateString()
       : undefined;
 
-    const isAdmin = Boolean(
-      user?.id &&
-      (
-        group.creatorId === user.id ||
-        group.members.some((member) => member.userId === user.id && member.role === "admin")
-      )
-    );
-
     return {
       name: group.name ?? "Grupo",
       description:
@@ -945,16 +1445,20 @@ export default function GroupDetailPage() {
       memberCount: group.members.length,
       createdAt,
       isPublic: group.isPublic,
-      isAdmin,
+      isAdmin: isCurrentUserAdmin,
       creatorLabel:
         group.creatorId === user?.id
           ? user?.name || user?.email || "Tú"
           : "Administrador",
     };
-  }, [group, user?.email, user?.id, user?.name]);
+  }, [group, isCurrentUserAdmin, user?.email, user?.id, user?.name]);
 
   const canJoin = Boolean(group) && Boolean(display?.isPublic) && !display?.isAdmin && !isMember;
+  const canRequestAccess =
+    Boolean(group) && Boolean(display && !display.isPublic && !display.isAdmin) && !isMember;
   const canCreatePost = Boolean(group) && (display?.isAdmin || isMember);
+  const hasPendingJoinRequest = userJoinRequest?.status === "pending";
+  const wasJoinRequestRejected = userJoinRequest?.status === "rejected";
 
   const renderHeader = () => (
     <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -1041,6 +1545,25 @@ export default function GroupDetailPage() {
           </CardHeader>
 
           <CardContent className="space-y-6">
+            {canRequestAccess ? (
+              <div className="rounded-md border border-dashed bg-muted/50 p-4 text-sm text-muted-foreground">
+                {hasPendingJoinRequest ? (
+                  <p>
+                    Ya enviaste una solicitud. Te notificaremos cuando las administradoras la revisen.
+                  </p>
+                ) : (
+                  <p>
+                    Este es un grupo privado. Envía una solicitud para participar en sus actividades y
+                    discusiones.
+                  </p>
+                )}
+                {wasJoinRequestRejected ? (
+                  <p className="mt-2 text-xs text-destructive">
+                    Tu última solicitud fue rechazada. Puedes volver a intentarlo cuando estés lista.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             <section className="grid gap-6 sm:grid-cols-2">
               <div className="space-y-3">
                 <h2 className="text-lg font-semibold flex items-center gap-2">
@@ -1074,14 +1597,235 @@ export default function GroupDetailPage() {
               </div>
             </section>
 
-            <div className="pt-6 border-t">
-              <h2 className="text-lg font-semibold">Acerca del grupo</h2>
-              <p className="text-muted-foreground mt-2">
-                {group.participationRules || "El administrador aún no ha definido reglas de participación."}
-              </p>
+            <div className="pt-6 border-t space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="text-lg font-semibold">Acerca del grupo</h2>
+                {display.isAdmin ? (
+                  isEditingGroupInfo ? (
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={handleCancelEditGroupInfo} disabled={isSavingGroupInfo}>
+                        Cancelar
+                      </Button>
+                      <Button size="sm" onClick={handleSaveGroupInfo} disabled={isSavingGroupInfo}>
+                        {isSavingGroupInfo ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                            Guardando...
+                          </>
+                        ) : (
+                          "Guardar cambios"
+                        )}
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={handleStartEditGroupInfo}>
+                      Editar información
+                    </Button>
+                  )
+                ) : null}
+              </div>
+
+              {display.isAdmin && isEditingGroupInfo ? (
+                <div className="space-y-4 rounded-md border bg-muted/40 p-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="group-description">Descripción del grupo</Label>
+                    <Textarea
+                      id="group-description"
+                      placeholder="Explica brevemente de qué trata tu grupo."
+                      value={editedDescription}
+                      onChange={(event) => setEditedDescription(event.target.value)}
+                      maxLength={500}
+                      rows={3}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      La descripción aparece en la cabecera del grupo. Máximo 500 caracteres.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-semibold">Privacidad del grupo</Label>
+                    <RadioGroup
+                      value={editedIsPublic ? "public" : "private"}
+                      onValueChange={(value) => setEditedIsPublic(value === "public")}
+                      className="grid gap-3 sm:grid-cols-2"
+                    >
+                      <label className="flex cursor-pointer items-start gap-3 rounded-md border bg-background p-3 text-sm">
+                        <RadioGroupItem value="public" aria-label="Grupo público" />
+                        <div className="space-y-1">
+                          <span className="font-medium text-foreground">Público</span>
+                          <p className="text-xs text-muted-foreground">
+                            Cualquier persona puede ver y unirse sin aprobación.
+                          </p>
+                        </div>
+                      </label>
+                      <label className="flex cursor-pointer items-start gap-3 rounded-md border bg-background p-3 text-sm">
+                        <RadioGroupItem value="private" aria-label="Grupo privado" />
+                        <div className="space-y-1">
+                          <span className="font-medium text-foreground">Privado</span>
+                          <p className="text-xs text-muted-foreground">
+                            Requiere solicitud y aprobación para unirse.
+                          </p>
+                        </div>
+                      </label>
+                    </RadioGroup>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="group-about">Acerca del grupo</Label>
+                    <Textarea
+                      id="group-about"
+                      placeholder="Describe las reglas, expectativas o el propósito del grupo."
+                      value={editedAbout}
+                      onChange={(event) => setEditedAbout(event.target.value)}
+                      maxLength={800}
+                      rows={4}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Este texto se muestra en la sección &quot;Acerca del grupo&quot;. Máximo 800 caracteres.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-muted-foreground">
+                  {group.participationRules || "El administrador aún no ha definido reglas de participación."}
+                </p>
+              )}
             </div>
 
+            {isCurrentUserAdmin ? (
+              <div className="pt-6 border-t space-y-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <h2 className="text-lg font-semibold">Solicitudes pendientes</h2>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => router.push("/solicitudes")}>
+                      Ir al panel de solicitudes
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => loadPendingRequests(true)} disabled={isLoadingRequests}>
+                      {isLoadingRequests ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                          Actualizando...
+                        </>
+                      ) : (
+                        "Actualizar"
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                {isLoadingRequests ? (
+                  <div className="flex items-center gap-2 rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    Cargando solicitudes...
+                  </div>
+                ) : pendingRequests.length === 0 ? (
+                  <div className="flex items-center gap-3 rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+                    <Inbox className="h-4 w-4" aria-hidden="true" />
+                    No hay solicitudes pendientes para este grupo.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {pendingRequests.map((request) => (
+                      <div key={request.id} className="rounded-md border bg-muted/30 p-4">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                          <p className="text-sm font-semibold text-foreground">
+                            {joinRequestUserLabel(request)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatPostDateTime(request.createdAt)}
+                          </p>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Solicitó unirse a <span className="font-medium text-foreground">{group.name}</span>.
+                        </p>
+                        {request.message ? (
+                          <p className="mt-2 rounded-md border bg-background p-3 text-sm text-foreground">
+                            “{request.message}”
+                          </p>
+                        ) : null}
+                        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                          <Button
+                            variant="outline"
+                            onClick={() => handleRejectRequest(request)}
+                            disabled={processingRequest[request.id] === "reject"}
+                          >
+                            {processingRequest[request.id] === "reject" ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                                Rechazando...
+                              </>
+                            ) : (
+                              "Rechazar"
+                            )}
+                          </Button>
+                          <Button
+                            className="bg-gradient-primary"
+                            onClick={() => handleAcceptRequest(request)}
+                            disabled={processingRequest[request.id] === "accept"}
+                          >
+                            {processingRequest[request.id] === "accept" ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                                Aceptando...
+                              </>
+                            ) : (
+                              <>
+                                <Check className="mr-2 h-4 w-4" aria-hidden="true" />
+                                Aceptar
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              ) : null}
+
             <div className="pt-6 border-t space-y-4">
+              {display.isAdmin ? (
+                <div className="space-y-3">
+                  <h2 className="text-lg font-semibold">Miembros</h2>
+                  {group.members.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Aún no hay miembros en este grupo.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {group.members.map((member) => (
+                        <li
+                          key={member.userId}
+                          className="flex items-center justify-between rounded-md border bg-muted/30 p-3 text-sm"
+                        >
+                          <div className="flex items-center gap-2">
+                            <User className="h-4 w-4 text-primary" aria-hidden="true" />
+                            <span className="font-medium text-foreground">
+                              {member.userId === group.creatorId ? `${member.userId} (Creador)` : member.userId}
+                            </span>
+                          </div>
+                          {member.userId !== group.creatorId ? (
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => handleRemoveMember(member.userId)}
+                              disabled={removingMember[member.userId]}
+                            >
+                              {removingMember[member.userId] ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                                  Eliminando...
+                                </>
+                              ) : (
+                                "Eliminar"
+                              )}
+                            </Button>
+                          ) : (
+                            <Badge variant="outline">Creador</Badge>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ) : null}
+
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <h2 className="text-lg font-semibold">Publicaciones del grupo</h2>
@@ -1630,12 +2374,11 @@ export default function GroupDetailPage() {
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                           <AlertDialogHeader>
-                            <AlertDialogTitle>
-                              ¿Quieres abandonar el grupo?
-                            </AlertDialogTitle>
-                          <AlertDialogDescription>
-                              Dejarás de recibir actualizaciones de &quot;{display?.name}&quot; y necesitarás volver a unirte para participar.
-                          </AlertDialogDescription>
+                            <AlertDialogTitle>¿Quieres abandonar el grupo?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Dejarás de recibir actualizaciones de &quot;{display?.name}&quot; y necesitarás volver a
+                              unirte para participar.
+                            </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancelar</AlertDialogCancel>
@@ -1663,9 +2406,7 @@ export default function GroupDetailPage() {
                     </AlertDialogTrigger>
                     <AlertDialogContent>
                       <AlertDialogHeader>
-                        <AlertDialogTitle>
-                          ¿Confirmas que quieres unirte al grupo?
-                        </AlertDialogTitle>
+                        <AlertDialogTitle>¿Confirmas que quieres unirte al grupo?</AlertDialogTitle>
                         <AlertDialogDescription>
                           Pasarás a ser miembro de &quot;{display?.name}&quot; y podrías recibir notificaciones.
                         </AlertDialogDescription>
@@ -1681,6 +2422,64 @@ export default function GroupDetailPage() {
                       </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
+                ) : canRequestAccess ? (
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      size="lg"
+                      className="sm:w-auto"
+                      disabled={hasPendingJoinRequest || (rejectedGroups[group.id] && !isMember)}
+                      variant={
+                        hasPendingJoinRequest
+                          ? "secondary"
+                          : rejectedGroups[group.id] && !isMember
+                            ? "destructive"
+                            : "default"
+                      }
+                      onClick={handleOpenRequestDialog}
+                    >
+                      {hasPendingJoinRequest
+                        ? "Solicitud enviada"
+                        : rejectedGroups[group.id] && !isMember
+                          ? "Solicitud rechazada"
+                          : "Solicitar unirse"}
+                    </Button>
+                    {hasPendingJoinRequest ? (
+                      <p className="text-sm text-muted-foreground">
+                        Tu solicitud está pendiente de aprobación.
+                      </p>
+                    ) : wasJoinRequestRejected ? (
+                      <p className="text-sm text-muted-foreground">
+                        Tu última solicitud fue rechazada. Puedes volver a intentarlo cuando quieras.
+                      </p>
+                    ) : rejectedGroups[group.id] && !isMember ? (
+                      <p className="text-sm text-destructive">
+                        Tu solicitud fue rechazada. Puedes enviar una nueva en unos momentos.
+                      </p>
+                    ) : null}
+                    <AlertDialog open={requestDialogOpen} onOpenChange={handleRequestDialogChange}>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Confirmar solicitud</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            {`¿Desea enviar una solicitud al grupo "${display?.name}"?`}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel disabled={isRequestingAccess}>Cancelar</AlertDialogCancel>
+                          <AlertDialogAction onClick={handleRequestAccess} disabled={isRequestingAccess}>
+                            {isRequestingAccess ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                                Enviando...
+                              </>
+                            ) : (
+                              "Aceptar"
+                            )}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
                 ) : (
                   <Button size="lg" variant="outline" className="sm:w-auto" disabled>
                     {display?.isAdmin ? "Eres administradora" : "Unión no disponible"}

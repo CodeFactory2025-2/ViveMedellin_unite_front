@@ -4,6 +4,11 @@
 export type NotificationType =
   | "group:new-member"
   | "group:member-left"
+  | "group:join-request"
+  | "group:join-accepted"
+  | "group:join-rejected"
+  | "group:join-response"
+  | "group:deleted"
   | "group:new-post"
   | "group:new-comment"
   | "system";
@@ -93,5 +98,39 @@ export const clearNotifications = () => {
     return;
   }
   window.localStorage.removeItem(NOTIFICATIONS_KEY);
+  window.dispatchEvent(new Event("notifications:updated"));
+};
+
+const USER_NOTIFICATIONS_PREFIX = "vive-medellin-user-notifications";
+
+export const createEmailNotification = (userId: string, notification: Omit<NotificationPayload, "id" | "createdAt" | "read">) => {
+  if (!isBrowser || !userId) {
+    return;
+  }
+
+  const key = `${USER_NOTIFICATIONS_PREFIX}-${userId}`;
+  const stored = window.localStorage.getItem(key);
+  let list: NotificationPayload[] = [];
+
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        list = parsed;
+      }
+    } catch (error) {
+      console.warn("No se pudieron leer las notificaciones por usuario", error);
+    }
+  }
+
+  const newNotification: NotificationPayload = {
+    id: Math.random().toString(36).slice(2),
+    createdAt: Date.now(),
+    read: false,
+    ...notification,
+  };
+
+  list.push(newNotification);
+  window.localStorage.setItem(key, JSON.stringify(list));
   window.dispatchEvent(new Event("notifications:updated"));
 };

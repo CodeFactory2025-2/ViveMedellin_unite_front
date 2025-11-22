@@ -1,7 +1,7 @@
 // src/lib/groups-api.ts
 // API simulada para la gestión de grupos
 
-import { addNotification, type NotificationType } from "@/lib/notifications-api";
+import { addNotification, createEmailNotification, type NotificationType } from "@/lib/notifications-api";
 
 // Tipos
 export interface GroupPostComment {
@@ -149,6 +149,139 @@ export interface GroupActivitySummary {
   recentMembers: Array<GroupMemberActivity & { groupSlug: string; groupName: string; isPublic: boolean }>;
 }
 
+export type JoinRequestStatus = "pending" | "accepted" | "rejected";
+
+export interface GroupJoinRequest {
+  id: string;
+  groupId: string;
+  groupSlug: string;
+  groupName: string;
+  userId: string;
+  userName?: string;
+  userEmail?: string;
+  message?: string;
+  status: JoinRequestStatus;
+  createdAt: number;
+  respondedAt?: number;
+  handledBy?: string;
+}
+
+export interface RequestJoinGroupOptions {
+  message?: string;
+  userName?: string;
+  userEmail?: string;
+}
+
+export interface CreateJoinRequestPayload {
+  id: string;
+  groupId: string;
+  userId: string;
+  status: JoinRequestStatus;
+  createdAt: number;
+}
+
+export interface AdminJoinRequestsPayload {
+  requests: GroupJoinRequest[];
+  managedGroups: Array<Pick<Group, "id" | "name" | "slug">>;
+}
+
+export interface JoinRequestWithDetails extends GroupJoinRequest {
+  userAvatar?: string;
+}
+
+export interface Membership {
+  groupId: string;
+  userId: string;
+  role: GroupMember["role"];
+  joinedAt: number;
+}
+
+export const removeGroupMember = async (
+  groupId: string,
+  targetUserId: string,
+  adminId: string,
+): Promise<ApiResponse<Group>> => {
+  await delay(300);
+
+  const groups = getGroups();
+  const groupIndex = groups.findIndex((group) => group.id === groupId);
+
+  if (groupIndex === -1) {
+    return {
+      success: false,
+      error: "Grupo no encontrado",
+      status: 404,
+    };
+  }
+
+  const group = groups[groupIndex];
+
+  if (!isGroupAdmin(group, adminId)) {
+    return {
+      success: false,
+      error: "No tienes permisos para gestionar miembros en este grupo",
+      status: 403,
+    };
+  }
+
+  if (group.creatorId === targetUserId) {
+    return {
+      success: false,
+      error: "No puedes eliminar al creador del grupo",
+      status: 409,
+    };
+  }
+
+  const memberExists = group.members.some((member) => member.userId === targetUserId);
+  if (!memberExists) {
+    return {
+      success: false,
+      error: "El usuario no es miembro del grupo",
+      status: 404,
+    };
+  }
+
+  group.members = group.members.filter((member) => member.userId !== targetUserId);
+  groups[groupIndex] = group;
+  saveGroups(groups);
+
+  pushNotification(
+    "group:member-left",
+    `Miembro removido de ${group.name}`,
+    `${targetUserId} fue removido del grupo por una administradora.`,
+    {
+      groupId,
+      removedBy: adminId,
+      userId: targetUserId,
+      memberCount: group.members.length,
+    },
+  );
+
+  notifyJoinRequestsUpdate({ action: "member-removed", groupId, userId: targetUserId });
+
+  return {
+    success: true,
+    data: group,
+  };
+};
+
+export const canAccessGroupContent = (group: Group, userId: string): boolean => {
+  if (group.isPublic) {
+    return true;
+  }
+
+  if (group.creatorId === userId || group.members.some((member) => member.userId === userId)) {
+    return true;
+  }
+
+  const requests = getJoinRequests();
+  const hasRejected = requests.some(
+    (request) => request.groupId === group.id && request.userId === userId && request.status === "rejected",
+  );
+
+  return !hasRejected;
+};
+
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
@@ -158,6 +291,7 @@ export interface ApiResponse<T> {
 
 // Simulación de base de datos
 const GROUPS_KEY = "vive-medellin-groups";
+const GROUP_JOIN_REQUESTS_KEY = "vive-medellin-group-requests";
 const isBrowser = typeof window !== "undefined";
 
 // Utilidades
@@ -342,6 +476,119 @@ const ensureSlugs = (groups: StoredGroup[]): Group[] => {
   return withSlugs;
 };
 
+const notifyJoinRequestsUpdate = (detail: Record<string, unknown> = { action: "updated" }) => {
+  if (!isBrowser) {
+    return;
+  }
+  window.dispatchEvent(
+    new CustomEvent("group-requests:updated", {
+      detail,
+    }),
+  );
+};
+
+const getJoinRequests = (): GroupJoinRequest[] => {
+  if (!isBrowser) {
+    return [];
+  }
+
+  const requestsRaw = window.localStorage.getItem(GROUP_JOIN_REQUESTS_KEY);
+  if (!requestsRaw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(requestsRaw);
+    if (Array.isArray(parsed)) {
+      return parsed as GroupJoinRequest[];
+    }
+  } catch (error) {
+    console.warn("No se pudieron leer las solicitudes almacenadas", error);
+  }
+
+  return [];
+};
+
+const saveJoinRequests = (requests: GroupJoinRequest[], options: { silent?: boolean } = {}) => {
+  if (!isBrowser) {
+    return;
+  }
+
+  window.localStorage.setItem(GROUP_JOIN_REQUESTS_KEY, JSON.stringify(requests));
+  if (!options.silent) {
+    notifyJoinRequestsUpdate();
+  }
+};
+
+export const checkPendingJoinRequest = (userId: string, groupId: string): boolean => {
+  const requests = getJoinRequests();
+  return requests.some(
+    (request) =>
+      request.userId === userId && request.groupId === groupId && request.status === "pending",
+  );
+};
+
+export const createJoinRequest = async (
+  groupId: string,
+  userId: string,
+  options: { userName?: string; userEmail?: string; message?: string } = {},
+): Promise<ApiResponse<GroupJoinRequest>> => {
+  await delay(500);
+
+  if (!isBrowser) {
+    return {
+      success: false,
+      error: "No se pudo procesar la solicitud en este entorno.",
+      status: 500,
+    };
+  }
+
+  // Deshabilitamos la falla aleatoria para evitar errores molestos en desarrollo
+  if (Math.random() < 0.0) {
+    console.warn("[Mock API] Error aleatorio al crear solicitud de ingreso");
+    return {
+      success: false,
+      error:
+        "Hubo un error técnico al procesar tu solicitud. No fue posible enviarla. Por favor, inténtalo nuevamente más tarde.",
+      status: 500,
+    };
+  }
+
+  const requests = getJoinRequests();
+  const newRequest: GroupJoinRequest = {
+    id: generateId(),
+    groupId,
+    groupSlug: "",
+    groupName: "",
+    userId,
+    userName: options.userName,
+    userEmail: options.userEmail,
+    message: options.message?.trim() || undefined,
+    status: "pending",
+    createdAt: Date.now(),
+  };
+
+  requests.push(newRequest);
+  saveJoinRequests(requests);
+  window.dispatchEvent(
+    new CustomEvent("group-requests:updated", {
+      detail: { groupId, userId, action: "created", requestId: newRequest.id },
+    }),
+  );
+
+  return {
+    success: true,
+    data: newRequest,
+  };
+};
+
+const isGroupAdmin = (group: Group, userId: string): boolean => {
+  return (
+    group.creatorId === userId ||
+    group.members.some((member) => member.userId === userId && member.role === "admin")
+  );
+};
+
 const delay = (ms: number = 800): Promise<void> => {
   return new Promise(resolve => setTimeout(resolve, ms));
 };
@@ -354,16 +601,22 @@ const delay = (ms: number = 800): Promise<void> => {
 export const getAllGroups = async (userId: string): Promise<ApiResponse<Group[]>> => {
   await delay();
   
-  const allGroups = getGroups();
-  
-  // Filtrar para mostrar solo los grupos públicos y los privados a los que pertenece el usuario
-  const accessibleGroups = allGroups.filter(group => 
-    group.isPublic || group.members.some(m => m.userId === userId)
-  );
+  const allGroups = getGroups().map((group) => {
+    const hasAccess = group.isPublic || group.members.some((member) => member.userId === userId);
+    if (hasAccess) {
+      return group;
+    }
+
+    return {
+      ...group,
+      posts: [],
+      events: [],
+    };
+  });
   
   return {
     success: true,
-    data: accessibleGroups
+    data: allGroups
   };
 };
 
@@ -415,17 +668,17 @@ export const getGroupBySlug = async (slug: string, userId: string): Promise<ApiR
 
   const hasAccess = group.isPublic || group.members.some((member) => member.userId === userId);
 
-  if (!hasAccess) {
-    return {
-      success: false,
-      error: 'No tienes permiso para ver este grupo',
-      status: 403,
-    };
-  }
+  const sanitizedGroup = hasAccess
+    ? group
+    : {
+        ...group,
+        posts: [],
+        events: [],
+      };
 
   return {
     success: true,
-    data: group,
+    data: sanitizedGroup,
   };
 };
 
@@ -643,6 +896,462 @@ export const joinGroup = async (groupId: string, userId: string): Promise<ApiRes
   return {
     success: true,
     data: group
+  };
+};
+
+/**
+ * Solicita acceso a un grupo privado
+ */
+export const requestJoinGroup = async (
+  groupId: string,
+  userId: string,
+  options: RequestJoinGroupOptions = {},
+): Promise<ApiResponse<GroupJoinRequest>> => {
+  await delay(300);
+
+  const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+  if (!normalizedUserId) {
+    return {
+      success: false,
+      error: "Debes iniciar sesión para enviar una solicitud.",
+      status: 401,
+    };
+  }
+
+  const groups = getGroups();
+  const group = groups.find((g) => g.id === groupId);
+
+  if (!group) {
+    return {
+      success: false,
+      error: "Grupo no encontrado",
+      status: 404,
+    };
+  }
+
+  if (group.isPublic) {
+    return {
+      success: false,
+      error: "Este grupo es público, puedes unirte directamente.",
+      status: 400,
+    };
+  }
+
+  if (group.members.some((member) => member.userId === normalizedUserId)) {
+    return {
+      success: false,
+      error: "Ya eres miembro de este grupo.",
+      status: 409,
+    };
+  }
+
+  const hasPendingRequest = checkPendingJoinRequest(normalizedUserId, groupId);
+
+  if (hasPendingRequest) {
+    return {
+      success: false,
+      error: "Ya tienes una solicitud pendiente para este grupo.",
+      status: 409,
+    };
+  }
+
+  const trimmedMessage = options.message?.trim();
+  const createResult = await createJoinRequest(groupId, normalizedUserId, {
+    userEmail: options.userEmail,
+    userName: options.userName,
+    message: trimmedMessage,
+  });
+
+  if (!createResult.success || !createResult.data) {
+    return createResult;
+  }
+
+  const newRequest: GroupJoinRequest = {
+    ...createResult.data,
+    groupSlug: group.slug,
+    groupName: group.name,
+  };
+
+  const requests = getJoinRequests().filter((request) => request.id !== newRequest.id);
+  requests.push(newRequest);
+  saveJoinRequests(requests);
+
+  pushNotification(
+    "group:join-request",
+    "Nueva solicitud para unirse a tu grupo",
+    `${options.userName ?? options.userEmail ?? "Una usuaria"} ha solicitado unirse a ${group.name}.`,
+    {
+      groupId,
+      requestId: newRequest.id,
+      groupSlug: group.slug,
+      userId: normalizedUserId,
+    },
+  );
+
+  return {
+    success: true,
+    data: newRequest,
+  };
+};
+
+/**
+ * Obtiene las solicitudes de ingreso del usuario
+ */
+export const getUserJoinRequests = async (userId: string): Promise<ApiResponse<GroupJoinRequest[]>> => {
+  await delay(200);
+
+  const requests = getJoinRequests()
+    .filter((request) => request.userId === userId)
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+  return {
+    success: true,
+    data: requests,
+  };
+};
+
+/**
+ * Obtiene las solicitudes pendientes para los grupos donde el usuario es administrador
+ */
+export const getJoinRequestsForAdmin = async (
+  adminId: string,
+): Promise<ApiResponse<AdminJoinRequestsPayload>> => {
+  const normalizedAdminId = typeof adminId === "string" ? adminId.trim() : "";
+
+  if (!normalizedAdminId) {
+    return {
+      success: false,
+      error: "Debes iniciar sesión para ver las solicitudes.",
+      status: 401,
+    };
+  }
+
+  await delay(200);
+
+  const groups = getGroups();
+  const managedGroups = groups
+    .filter((group) => isGroupAdmin(group, normalizedAdminId))
+    .map((group) => ({
+      id: group.id,
+      name: group.name,
+      slug: group.slug,
+    }));
+
+  if (!managedGroups.length) {
+    return {
+      success: true,
+      data: {
+        requests: [],
+        managedGroups: [],
+      },
+    };
+  }
+
+  const managedGroupIds = new Set(managedGroups.map((group) => group.id));
+  const requests = getJoinRequests()
+    .filter((request) => managedGroupIds.has(request.groupId) && request.status === "pending")
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+  return {
+    success: true,
+    data: {
+      requests,
+      managedGroups,
+    },
+  };
+};
+
+export const getAdminJoinRequests = async (
+  adminId: string,
+): Promise<ApiResponse<JoinRequestWithDetails[]>> => {
+  await delay(300);
+
+  const normalizedAdminId = typeof adminId === "string" ? adminId.trim() : "";
+  if (!normalizedAdminId) {
+    return {
+      success: false,
+      error: "Debes iniciar sesión para ver las solicitudes.",
+      status: 401,
+    };
+  }
+
+  const groups = getGroups();
+  const managedGroupIds = new Set(
+    groups.filter((group) => isGroupAdmin(group, normalizedAdminId)).map((group) => group.id),
+  );
+
+  if (!managedGroupIds.size) {
+    return {
+      success: true,
+      data: [],
+    };
+  }
+
+  const requests = getJoinRequests()
+    .filter((request) => managedGroupIds.has(request.groupId) && request.status === "pending")
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+  const withDetails: JoinRequestWithDetails[] = requests.map((request) => {
+    const group = groups.find((g) => g.id === request.groupId);
+    return {
+      ...request,
+      groupName: group?.name ?? request.groupName,
+      groupSlug: group?.slug ?? request.groupSlug,
+    };
+  });
+
+  return {
+    success: true,
+    data: withDetails,
+  };
+};
+
+/**
+ * Acepta una solicitud pendiente y agrega al usuario como miembro
+ */
+export const acceptJoinRequest = async (
+  requestId: string,
+  adminId: string,
+): Promise<ApiResponse<{ request: GroupJoinRequest; group: Group }>> => {
+  const normalizedAdminId = typeof adminId === "string" ? adminId.trim() : "";
+
+  if (!normalizedAdminId) {
+    return {
+      success: false,
+      error: "Debes iniciar sesión para gestionar solicitudes.",
+      status: 401,
+    };
+  }
+
+  await delay(500);
+
+  const requests = getJoinRequests();
+  const requestIndex = requests.findIndex((request) => request.id === requestId);
+
+  if (requestIndex === -1) {
+    return {
+      success: false,
+      error: "Solicitud no encontrada",
+      status: 404,
+    };
+  }
+
+  const request = requests[requestIndex];
+
+  if (request.status !== "pending") {
+    return {
+      success: false,
+      error: "Esta solicitud ya fue procesada.",
+      status: 409,
+    };
+  }
+
+  const groups = getGroups();
+  const groupIndex = groups.findIndex((group) => group.id === request.groupId);
+
+  if (groupIndex === -1) {
+    return {
+      success: false,
+      error: "El grupo asociado ya no está disponible.",
+      status: 404,
+    };
+  }
+
+  const group = groups[groupIndex];
+
+  if (!isGroupAdmin(group, normalizedAdminId)) {
+    return {
+      success: false,
+      error: "No tienes permisos para gestionar solicitudes en este grupo.",
+      status: 403,
+    };
+  }
+
+  if (!group.members.some((member) => member.userId === request.userId)) {
+    group.members.push({
+      userId: request.userId,
+      role: "member",
+      joinedAt: Date.now(),
+    });
+    groups[groupIndex] = group;
+    saveGroups(groups);
+  }
+
+  const updatedRequest: GroupJoinRequest = {
+    ...request,
+    status: "accepted",
+    respondedAt: Date.now(),
+    handledBy: normalizedAdminId,
+  };
+
+  requests[requestIndex] = updatedRequest;
+  saveJoinRequests(requests);
+
+  const applicantLabel = request.userName ?? request.userEmail ?? "Una usuaria";
+
+  pushNotification(
+    "group:new-member",
+    `Nueva solicitud aceptada en ${group.name}`,
+    `${applicantLabel} ahora es miembro del grupo.`,
+    {
+      groupId: group.id,
+      requestId,
+      adminId: normalizedAdminId,
+      status: "accepted",
+    },
+  );
+
+  pushNotification(
+    "group:join-response",
+    `Tu solicitud para unirte a ${group.name} fue aceptada`,
+    `Ahora eres miembro del grupo "${group.name}".`,
+    {
+      groupId: group.id,
+      requestId,
+      status: "accepted",
+      userId: request.userId,
+    },
+  );
+
+  createEmailNotification(request.userId, {
+    type: "group:join-accepted",
+    title: "Solicitud aceptada",
+    message: `Tu solicitud para unirte al grupo ${group.name} fue aprobada. Ahora eres miembro.`,
+    data: {
+      groupId: group.id,
+      requestId,
+      status: "accepted",
+    },
+  });
+
+  notifyJoinRequestsUpdate({
+    action: "accepted",
+    groupId: group.id,
+    userId: request.userId,
+    requestId,
+  });
+
+  console.info(`[Email simulado] ${applicantLabel} fue notificada: Tu solicitud para unirte al grupo ${group.name} fue aprobada. Ahora eres miembro.`);
+
+  return {
+    success: true,
+    data: {
+      request: updatedRequest,
+      group,
+    },
+  };
+};
+
+/**
+ * Rechaza una solicitud pendiente
+ */
+export const rejectJoinRequest = async (
+  requestId: string,
+  adminId: string,
+): Promise<ApiResponse<GroupJoinRequest>> => {
+  const normalizedAdminId = typeof adminId === "string" ? adminId.trim() : "";
+
+  if (!normalizedAdminId) {
+    return {
+      success: false,
+      error: "Debes iniciar sesión para gestionar solicitudes.",
+      status: 401,
+    };
+  }
+
+  await delay(400);
+
+  const requests = getJoinRequests();
+  const requestIndex = requests.findIndex((request) => request.id === requestId);
+
+  if (requestIndex === -1) {
+    return {
+      success: false,
+      error: "Solicitud no encontrada",
+      status: 404,
+    };
+  }
+
+  const request = requests[requestIndex];
+
+  if (request.status !== "pending") {
+    return {
+      success: false,
+      error: "Esta solicitud ya fue procesada.",
+      status: 409,
+    };
+  }
+
+  const groups = getGroups();
+  const group = groups.find((g) => g.id === request.groupId);
+
+  if (!group) {
+    return {
+      success: false,
+      error: "El grupo asociado ya no está disponible.",
+      status: 404,
+    };
+  }
+
+  if (!isGroupAdmin(group, normalizedAdminId)) {
+    return {
+      success: false,
+      error: "No tienes permisos para gestionar esta solicitud.",
+      status: 403,
+    };
+  }
+
+  const updatedRequest: GroupJoinRequest = {
+    ...request,
+    status: "rejected",
+    respondedAt: Date.now(),
+    handledBy: normalizedAdminId,
+    rejectedAt: Date.now(),
+  };
+
+  requests[requestIndex] = updatedRequest;
+  saveJoinRequests(requests);
+
+  const applicantLabel = request.userName ?? request.userEmail ?? "Una usuaria";
+
+  pushNotification(
+    "group:join-response",
+    `Tu solicitud para unirte a ${group.name} fue rechazada`,
+    `No fue posible aprobar tu ingreso al grupo "${group.name}".`,
+    {
+      groupId: group.id,
+      requestId,
+      adminId: normalizedAdminId,
+      status: "rejected",
+      userId: request.userId,
+    },
+  );
+
+  createEmailNotification(request.userId, {
+    type: "group:join-rejected",
+    title: "Solicitud rechazada",
+    message: `Tu solicitud para unirte al grupo ${group.name} fue rechazada.`,
+    data: {
+      groupId: group.id,
+      requestId,
+      status: "rejected",
+    },
+  });
+
+  console.info(
+    `[Email simulado] ${applicantLabel} fue notificada: Tu solicitud para unirte al grupo ${group.name} fue rechazada.`,
+  );
+
+  notifyJoinRequestsUpdate({
+    action: "rejected",
+    groupId: group.id,
+    userId: request.userId,
+    requestId,
+  });
+
+  return {
+    success: true,
+    data: updatedRequest,
   };
 };
 
@@ -1525,7 +2234,35 @@ export const initializeMockGroupsData = (): void => {
   }
 };
 
+export const initializeMockGroupJoinRequests = (): void => {
+  if (!isBrowser) {
+    return;
+  }
+
+  if (window.localStorage.getItem(GROUP_JOIN_REQUESTS_KEY)) {
+    return;
+  }
+
+  const sampleRequests: GroupJoinRequest[] = [
+    {
+      id: generateId(),
+      groupId: "3",
+      groupSlug: "club-de-lectura-medellin",
+      groupName: "Club de Lectura Medellín",
+      userId: "2",
+      userName: "Administrador",
+      userEmail: "admin@example.com",
+      message: "Me gustaría participar en las sesiones privadas del club.",
+      status: "pending",
+      createdAt: Date.now() - 1000 * 60 * 45,
+    },
+  ];
+
+  saveJoinRequests(sampleRequests, { silent: true });
+};
+
 // Inicializar datos de prueba
 if (typeof window !== "undefined") {
   initializeMockGroupsData();
+  initializeMockGroupJoinRequests();
 }

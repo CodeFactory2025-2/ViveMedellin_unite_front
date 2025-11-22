@@ -25,6 +25,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -37,8 +47,9 @@ import {
 } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { useRequestStatus } from "@/hooks/use-request-status";
 import * as groupsApi from "@/lib/groups-api";
-import type { Group } from "@/lib/groups-api";
+import type { Group, GroupJoinRequest } from "@/lib/groups-api";
 
 const visibilityOptions = [
   { value: "all", label: "Todos" },
@@ -57,6 +68,11 @@ export default function ExploreGroupsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [visibilityFilter, setVisibilityFilter] = useState("all");
+  const [joinRequests, setJoinRequests] = useState<GroupJoinRequest[]>([]);
+  const [requestDialogOpen, setRequestDialogOpen] = useState(false);
+  const [requestTargetGroup, setRequestTargetGroup] = useState<Group | null>(null);
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+  const { rejectedGroups, markRejected, clearRejected } = useRequestStatus(joinRequests, user?.id);
 
   useEffect(() => {
     let isMounted = true;
@@ -104,6 +120,68 @@ export default function ExploreGroupsPage() {
   }, [toast, user?.id]);
 
   useEffect(() => {
+    if (!user?.id) {
+      setJoinRequests([]);
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadRequests = async () => {
+      try {
+        const response = await groupsApi.getUserJoinRequests(user.id);
+        if (isMounted && response.success && response.data) {
+          setJoinRequests(response.data);
+        }
+      } catch (error) {
+        console.error("Error al cargar solicitudes de ingreso:", error);
+      }
+    };
+
+    void loadRequests();
+
+    if (typeof window !== "undefined") {
+      const handleUpdate = (event: Event) => {
+        const custom = event as CustomEvent;
+        const detail = (custom.detail ?? {}) as { action?: string; groupId?: string; userId?: string };
+        if (detail?.action === "accepted" && detail.userId === user?.id && detail.groupId) {
+          setGroups((previous) =>
+            previous.map((group) =>
+              group.id === detail.groupId
+                ? {
+                    ...group,
+                    members: group.members.some((member) => member.userId === user.id)
+                      ? group.members
+                      : [
+                          ...group.members,
+                          { userId: user.id, role: "member", joinedAt: Date.now() },
+                        ],
+                  }
+                : group,
+            ),
+          );
+          setJoinRequests((prev) => prev.filter((request) => request.groupId !== detail.groupId));
+          clearRejected(detail.groupId);
+        }
+        if (detail?.action === "rejected" && detail.userId === user?.id && detail.groupId) {
+          markRejected(detail.groupId);
+        }
+        void loadRequests();
+      };
+
+      window.addEventListener("group-requests:updated", handleUpdate as EventListener);
+      return () => {
+        isMounted = false;
+        window.removeEventListener("group-requests:updated", handleUpdate as EventListener);
+      };
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
     if (!groups.length) {
       setFilteredGroups([]);
       return;
@@ -144,6 +222,138 @@ export default function ExploreGroupsPage() {
     });
     return Array.from(uniqueCategories).sort();
   }, [groups]);
+
+  const handleOpenRequestDialog = (group: Group) => {
+    if (!user?.id) {
+      toast({
+        title: "Acción no permitida",
+        description: "Debes iniciar sesión para enviar una solicitud.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (groupsApi.checkPendingJoinRequest(user.id, group.id)) {
+      toast({
+        title: "Solicitud pendiente",
+        description: "Ya tienes una solicitud pendiente para este grupo.",
+        variant: "destructive",
+      });
+      setJoinRequests((previous) => {
+        if (previous.some((request) => request.groupId === group.id && request.status === "pending")) {
+          return previous;
+        }
+        const optimistic = {
+          id: `pending-${Date.now()}`,
+          groupId: group.id,
+          groupSlug: group.slug,
+          groupName: group.name,
+          userId: user.id,
+          userName: user.name,
+          userEmail: user.email,
+          status: "pending" as const,
+          createdAt: Date.now(),
+        };
+        return [optimistic, ...previous];
+      });
+      return;
+    }
+
+    setRequestTargetGroup(group);
+    setRequestDialogOpen(true);
+  };
+
+  const handleRequestDialogChange = (open: boolean) => {
+    if (!open && isSubmittingRequest) {
+      return;
+    }
+
+    setRequestDialogOpen(open);
+    if (!open) {
+      setRequestTargetGroup(null);
+    }
+  };
+
+  const handleConfirmJoinRequest = async () => {
+    if (!user?.id || !requestTargetGroup) {
+      toast({
+        title: "Acción no disponible",
+        description: "Debes iniciar sesión nuevamente para enviar la solicitud.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (joinRequests.some((request) => request.groupId === requestTargetGroup.id && request.status === "pending")) {
+      toast({
+        title: "Solicitud pendiente",
+        description: "Ya tienes una solicitud pendiente para este grupo.",
+        variant: "destructive",
+      });
+      setRequestDialogOpen(false);
+      setRequestTargetGroup(null);
+      return;
+    }
+
+    const optimisticRequestId = `pending-${Date.now()}`;
+    const optimisticRequest: GroupJoinRequest = {
+      id: optimisticRequestId,
+      groupId: requestTargetGroup.id,
+      groupSlug: requestTargetGroup.slug,
+      groupName: requestTargetGroup.name,
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      status: "pending",
+      createdAt: Date.now(),
+    };
+
+    setJoinRequests((previous) => [optimisticRequest, ...previous]);
+    setIsSubmittingRequest(true);
+
+    try {
+      const response = await groupsApi.requestJoinGroup(requestTargetGroup.id, user.id, {
+        userName: user.name,
+        userEmail: user.email,
+      });
+
+      if (response.success && response.data) {
+        setJoinRequests((previous) => [
+          response.data!,
+          ...previous.filter(
+            (request) => request.id !== optimisticRequestId && request.id !== response.data?.id,
+          ),
+        ]);
+        toast({
+          title: "Tu solicitud ha sido enviada exitosamente",
+          description: `Notificamos al equipo administrador de "${requestTargetGroup.name}".`,
+        });
+        setRequestDialogOpen(false);
+        setRequestTargetGroup(null);
+      } else {
+        setJoinRequests((previous) => previous.filter((request) => request.id !== optimisticRequestId));
+        toast({
+          title: "No pudimos enviar la solicitud",
+          description:
+            response.error ||
+            "Hubo un error técnico al procesar tu solicitud. No fue posible enviarla. Por favor, inténtalo nuevamente más tarde.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      setJoinRequests((previous) => previous.filter((request) => request.id !== optimisticRequestId));
+      toast({
+        title: "No pudimos enviar la solicitud",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Hubo un error técnico al procesar tu solicitud. No fue posible enviarla. Por favor, inténtalo nuevamente más tarde.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmittingRequest(false);
+    }
+  };
 
   const handleJoinGroup = async (groupId: string) => {
     if (!user?.id) {
@@ -204,6 +414,7 @@ export default function ExploreGroupsPage() {
     );
 
   return (
+    <>
     <Suspense
       fallback={
         <div className="min-h-screen flex items-center justify-center bg-gradient-subtle text-muted-foreground">
@@ -312,6 +523,17 @@ export default function ExploreGroupsPage() {
               {filteredGroups.map((group) => {
                 const memberCount = group.members?.length ?? 0;
                 const alreadyMember = isMember(group);
+                const hasPendingRequest = joinRequests.some(
+                  (request) => request.groupId === group.id && request.status === "pending",
+                );
+                const isRejectedTemp = !alreadyMember && rejectedGroups[group.id];
+                const privateButtonVariant: "default" | "secondary" | "ghost" = alreadyMember
+                  ? "ghost"
+                  : isRejectedTemp
+                    ? "destructive"
+                    : hasPendingRequest
+                    ? "secondary"
+                    : "default";
 
                 return (
                   <Card key={group.id} className="flex flex-col justify-between">
@@ -342,20 +564,51 @@ export default function ExploreGroupsPage() {
                         <span className="font-medium">Tema:</span> {group.theme || "General"}
                       </div>
                     </CardContent>
-                    <CardFooter className="flex justify-between items-center gap-3">
+                    <CardFooter className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <Button
                         variant="secondary"
                         onClick={() => router.push(`/grupos/${group.slug}`)}
+                        className="w-full sm:w-auto"
                       >
                         Ver detalles
                         <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
                       </Button>
-                      <Button
-                        onClick={() => handleJoinGroup(group.id)}
-                        disabled={alreadyMember || !group.isPublic}
-                      >
-                        {alreadyMember ? "Ya eres miembro" : "Unirse"}
-                      </Button>
+                      {group.isPublic ? (
+                        <Button
+                          onClick={() => handleJoinGroup(group.id)}
+                          disabled={alreadyMember}
+                          className="w-full sm:w-auto"
+                        >
+                          {alreadyMember ? "Ya eres miembro" : "Unirse"}
+                        </Button>
+                      ) : (
+                        <div className="flex w-full flex-col items-stretch gap-1 sm:w-auto sm:items-end">
+                          <Button
+                            onClick={() => handleOpenRequestDialog(group)}
+                            disabled={alreadyMember || hasPendingRequest || isRejectedTemp}
+                            className="w-full sm:w-auto"
+                            variant={privateButtonVariant as any}
+                          >
+                            {alreadyMember
+                              ? "Ya eres miembro"
+                              : isRejectedTemp
+                                ? "Solicitud rechazada"
+                              : hasPendingRequest
+                                ? "Solicitud enviada"
+                                : "Solicitar unirse"}
+                          </Button>
+                          {!alreadyMember &&
+                          hasPendingRequest ? (
+                            <p className="text-center text-xs text-muted-foreground sm:text-right">
+                              Ya tienes una solicitud pendiente para este grupo.
+                            </p>
+                          ) : isRejectedTemp ? (
+                            <p className="text-center text-xs text-destructive sm:text-right">
+                              Tu solicitud fue rechazada. Puedes volver a intentarlo en unos momentos.
+                            </p>
+                          ) : null}
+                        </div>
+                      )}
                     </CardFooter>
                   </Card>
                 );
@@ -366,5 +619,34 @@ export default function ExploreGroupsPage() {
         </div>
       </RequireAuth>
     </Suspense>
+
+      <AlertDialog open={requestDialogOpen} onOpenChange={handleRequestDialogChange}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Confirmar solicitud
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {requestTargetGroup
+                ? `¿Desea enviar una solicitud al grupo "${requestTargetGroup.name}"?`
+                : "¿Desea enviar una solicitud al grupo?"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSubmittingRequest}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmJoinRequest} disabled={isSubmittingRequest}>
+              {isSubmittingRequest ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                  Enviando...
+                </>
+              ) : (
+                "Enviar solicitud"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
