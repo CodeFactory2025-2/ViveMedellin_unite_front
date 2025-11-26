@@ -527,7 +527,7 @@ export default function ExploreGroupsPage() {
                   (request) => request.groupId === group.id && request.status === "pending",
                 );
                 const isRejectedTemp = !alreadyMember && rejectedGroups[group.id];
-                const privateButtonVariant: "default" | "secondary" | "ghost" = alreadyMember
+                const privateButtonVariant: "default" | "secondary" | "ghost" | "destructive" = alreadyMember
                   ? "ghost"
                   : isRejectedTemp
                     ? "destructive"

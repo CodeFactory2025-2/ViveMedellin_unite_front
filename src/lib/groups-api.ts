@@ -164,6 +164,7 @@ export interface GroupJoinRequest {
   createdAt: number;
   respondedAt?: number;
   handledBy?: string;
+  rejectedAt?: number;
 }
 
 export interface RequestJoinGroupOptions {
