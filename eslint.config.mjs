@@ -11,6 +11,17 @@ const compat = new FlatCompat({
 
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
+
+  // Aquí agregamos las reglas que quieres ignorar
+  {
+    rules: {
+      "react-hooks/exhaustive-deps": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@next/next/no-img-element": "off",
+    },
+  },
+
+  // Tus ignores
   {
     ignores: [
       "node_modules/**",
